@@ -36,8 +36,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          console.log("=== 1부: 내 블로그 답글 달기 시작 ===")
+          echo "=== 1부: 내 블로그 답글 달기 시작 ==="
           node reply_agent.js
           
-          console.log("=== 2부: 이웃 새글 순회 시작 ===")
+          echo "=== 2부: 이웃 새글 순회 시작 ==="
           node feed_agent.js
