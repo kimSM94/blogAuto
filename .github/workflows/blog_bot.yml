@@ -1,0 +1,43 @@
+name: Naver Blog Automation Agent
+
+on:
+  push: # 💡 파일이 올라오면 강제로 스케줄러를 깨우는 알람입니다!
+    branches: [ main, master ]
+  schedule:
+    - cron: '30 3 * * *'
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-blog-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📂 소스 코드 가져오기
+        uses: actions/checkout@v3
+        
+      - name: ⚙️ Node.js 세팅 (버전 20)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          
+      - name: 📦 패키지 설치
+        run: npm install
+        
+      - name: 🌐 Playwright 브라우저 설치
+        run: npx playwright install chromium --with-deps
+        
+      - name: 🔑 안전한 로그인 세션 생성
+        run: echo '${{ secrets.NAVER_STATE_JSON }}' > state.json
+        
+      - name: 🚀 점심/저녁 에이전트 실행
+        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          console.log("=== 1부: 내 블로그 답글 달기 시작 ===")
+          node reply_agent.js
+          
+          console.log("=== 2부: 이웃 새글 순회 시작 ===")
+          node feed_agent.js
