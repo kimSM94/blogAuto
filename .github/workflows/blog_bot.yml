@@ -1,17 +1,12 @@
 name: Naver Blog Automation Agent
 
 on:
+  push: # 💡 파일이 올라오면 강제로 스케줄러를 깨우는 알람입니다!
+    branches: [ main, master ]
   schedule:
-    # ⏰ 아침 8시 (KST) -> UTC 23:00 (전날) - 신규 이웃 탐색용 (나중에 파일 만들면 여기에 추가)
-    # - cron: '0 23 * * *'
-    
-    # ⏰ 점심 12시 30분 (KST) -> UTC 03:30 - 답글 및 이웃새글 순회
     - cron: '30 3 * * *'
-    
-    # ⏰ 저녁 8시 00분 (KST) -> UTC 11:00 - 답글 및 이웃새글 순회
     - cron: '0 11 * * *'
-    
-  workflow_dispatch: # 이 줄이 있으면 GitHub 화면에서 수동으로 버튼을 눌러 즉시 실행할 수도 있습니다.
+  workflow_dispatch:
 
 jobs:
   run-blog-bot:
@@ -23,7 +18,7 @@ jobs:
       - name: ⚙️ Node.js 세팅 (버전 20)
         uses: actions/setup-node@v3
         with:
-          node-version: '20' # 이전에 Supabase가 권장했던 Node 20 버전으로 세팅!
+          node-version: '20'
           
       - name: 📦 패키지 설치
         run: npm install
@@ -31,12 +26,11 @@ jobs:
       - name: 🌐 Playwright 브라우저 설치
         run: npx playwright install chromium --with-deps
         
-      - name: 🔑 안전한 로그인 세션(state.json) 생성
+      - name: 🔑 안전한 로그인 세션 생성
         run: echo '${{ secrets.NAVER_STATE_JSON }}' > state.json
         
-      - name: 🚀 점심/저녁 에이전트 실행 (이웃새글 & 답글)
-        # 점심(03:30)이거나 저녁(11:00)이거나, 수동 실행일 때만 작동하도록 조건 설정
-        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'workflow_dispatch'
+      - name: 🚀 점심/저녁 에이전트 실행
+        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
