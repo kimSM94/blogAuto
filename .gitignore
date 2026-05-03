@@ -1,0 +1,11 @@
+# 의존성 폴더 (용량이 커서 올리지 않음, GitHub가 알아서 npm install로 설치함)
+node_modules/
+
+# 보안이 필요한 비밀 키 파일
+.env
+
+# 네이버 로그인 세션 파일 (해킹 방지)
+state.json
+
+# 기타 에디터/운영체제 숨김 파일
+.DS_Store
