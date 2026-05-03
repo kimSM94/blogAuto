@@ -6,7 +6,10 @@ const { OpenAI } = require('openai');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 🧠 [기능 1] 이웃의 위키(기억)를 DB에서 불러오는 함수
+// ==========================================
+// 🧠 1부: LLM Wiki (기억 장치) 로직
+// ==========================================
+
 async function getNeighborWiki(blogId) {
   const { data, error } = await supabase
     .from('neighbor_wiki')
@@ -14,13 +17,12 @@ async function getNeighborWiki(blogId) {
     .eq('blog_id', blogId)
     .single();
 
-  if (error && error.code !== 'PGRST116') { // 데이터가 없는 에러(첫 방문)는 무시
+  if (error && error.code !== 'PGRST116') {
     console.error('위키 조회 에러:', error.message);
   }
   return data || { persona: '첫 방문', interaction_history: '기록 없음', last_visited_at: null };
 }
 
-// 🧠 [기능 2] 이웃의 위키(기억)를 최신화하여 DB에 덮어쓰는 함수
 async function updateNeighborWiki(blogId, newPersona, newHistory) {
   const { error } = await supabase
     .from('neighbor_wiki')
@@ -33,11 +35,9 @@ async function updateNeighborWiki(blogId, newPersona, newHistory) {
   if (error) console.error('위키 업데이트 에러:', error.message);
 }
 
-// 🤖 [기능 3] LLM을 이용해 기억 기반 댓글 생성 + 위키 요약
 async function generateWikiComment(wiki, postContent) {
-  // 1. 진짜 사람처럼 과거 기억을 바탕으로 댓글 쓰기
   const commentResponse = await openai.chat.completions.create({
-    model: "gpt-4o-mini", // 혹은 gpt-3.5-turbo
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
@@ -59,15 +59,13 @@ async function generateWikiComment(wiki, postContent) {
 
   const myComment = commentResponse.choices[0].message.content.trim();
 
-  // 2. 방금 단 댓글과 글 내용을 바탕으로 위키(기억) 업데이트용 요약 만들기
   const wikiUpdateResponse = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
-        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘.
-        출력은 반드시 JSON 형식으로 해줘.
+        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘. 출력은 반드시 JSON 형식으로 해줘.
         {"persona": "이웃의 주요 관심사 (누적해서 업데이트)", "interaction_history": "지금까지 나눈 소통 핵심 요약 (방금 단 댓글 내용 포함)"}`
       },
       { role: "user", content: `기존 위키: ${JSON.stringify(wiki)}\n이번 글 내용: ${postContent}\n내가 방금 단 댓글: ${myComment}` }
@@ -75,17 +73,18 @@ async function generateWikiComment(wiki, postContent) {
   });
 
   const updatedWiki = JSON.parse(wikiUpdateResponse.choices[0].message.content);
-
   return { myComment, updatedWiki };
 }
 
-// ... (Playwright 브라우저 실행 및 이웃 새글 목록 순회하는 기존 코드는 그대로 유지) ...
+// ==========================================
+// 🏃‍♂️ 2부: 실제 네이버 블로그 접속 및 순회 로직
+// ==========================================
 
-async function processNeighborPost(page, blogId, postContent) {
+async function processNeighborPost(page, blogId, postContent, postUrl) {
   console.log(`\n🔍 [${blogId}] 이웃의 위키(기억)를 조회합니다...`);
   const wiki = await getNeighborWiki(blogId);
 
-  // 🛡️ [방어 로직] 12시간 이내에 방문한 적이 있다면 스킵! (도배 방지)
+  // 🛡️ [방어 로직] 12시간 이내 방문 스킵
   if (wiki.last_visited_at) {
     const lastVisit = new Date(wiki.last_visited_at);
     const hoursSinceLastVisit = Math.abs(new Date() - lastVisit) / 36e5;
@@ -98,11 +97,72 @@ async function processNeighborPost(page, blogId, postContent) {
   console.log(`📝 [${blogId}] 위키 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
   const { myComment, updatedWiki } = await generateWikiComment(wiki, postContent);
 
-  // ... (여기에 page.fill() 등을 이용해 myComment를 실제 네이버 블로그 창에 입력하고 등록하는 기존 코드 삽입) ...
-  console.log(`✅ [댓글 작성 완료] ${myComment}`);
+  // 해당 포스트로 이동하여 댓글 달기 (모바일 버전 기준)
+  console.log(`🚀 [${blogId}] 포스트로 이동하여 댓글을 작성합니다.`);
+  await page.goto(postUrl, { waitUntil: 'domcontentloaded' });
+  
+  try {
+    // 댓글 창 열기 및 입력 (네이버 블로그 모바일 UI 기준)
+    await page.waitForSelector('.btn_reply', { timeout: 5000 });
+    await page.click('.btn_reply');
+    await page.waitForSelector('.u_cbox_text', { timeout: 5000 });
+    await page.fill('.u_cbox_text', myComment);
+    
+    // 등록 버튼 클릭 (실제 봇 가동 시 아래 주석 해제)
+    await page.click('.u_cbox_btn_upload'); 
+    await page.waitForTimeout(2000); 
 
-  console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
-  await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+    console.log(`✅ [댓글 작성 완료] ${myComment}`);
+
+    console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
+    await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+  } catch (err) {
+    console.log(`❌ [${blogId}] 댓글 창을 찾을 수 없거나 에러가 발생했습니다. (댓글 막힘 등)`);
+  }
 }
 
-// runAgent() 등 메인 함수 실행
+async function runFeedAgent() {
+  console.log("🌟 [이웃새글] 피드 자동화 에이전트 시작...");
+  
+  // 깃허브 액션 환경을 위한 headless 설정
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  }); 
+  const context = await browser.newContext({
+      storageState: 'state.json' // 로그인 세션 유지
+  });
+  const page = await context.newPage();
+
+  try {
+    // 네이버 모바일 이웃 피드 접속
+    console.log("🌐 네이버 이웃 피드에 접속합니다...");
+    await page.goto('https://m.blog.naver.com/FeedList.naver', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(3000);
+
+    // 피드 목록 가져오기
+    const feedItems = await page.$$('.item.post._feed_item');
+    console.log(`총 ${feedItems.length}개의 최신 글을 발견했습니다.`);
+
+    for (let item of feedItems) {
+      // 작성자 아이디, 포스트 링크, 글 내용 추출
+      const blogId = await item.getAttribute('data-blog-id');
+      const postUrl = await item.getAttribute('data-link');
+      const postContent = await item.innerText();
+
+      if (blogId && postUrl) {
+        // 위키 봇에게 일거리 넘겨주기
+        await processNeighborPost(page, blogId, postContent, postUrl);
+      }
+    }
+
+  } catch (error) {
+    console.error("🚨 에러 발생:", error);
+  } finally {
+    await browser.close();
+    console.log("✅ 모든 작업을 마치고 브라우저를 종료합니다.");
+  }
+}
+
+// 프로그램 실행 버튼! (이게 있어야 작동합니다)
+runFeedAgent();

@@ -61,7 +61,10 @@ async function generateNeighborComment(postText) {
 async function runAgent() {
 console.log('🤖 네이버 블로그 자동화 에이전트 시작...');
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+                    headless: true,
+                    args: ['--no-sandbox', '--disable-setuid-sandbox']
+                  });
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
