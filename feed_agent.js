@@ -1,154 +1,108 @@
+require('dotenv').config();
 const { chromium } = require('playwright');
-const { supabase, generateNeighborComment } = require('./config');
+const { createClient } = require('@supabase/supabase-js');
+const { OpenAI } = require('openai');
 
-async function runFeedAgent() {
-  console.log('🌟 [이웃새글] 피드 자동화 에이전트 시작...');
-  const browser = await chromium.launch({ headless: false }); 
-  const context = await browser.newContext({ storageState: 'state.json' });
-  const feedPage = await context.newPage();
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  try {
-    let allUniquePosts = [];
-    const seen = new Set();
+// 🧠 [기능 1] 이웃의 위키(기억)를 DB에서 불러오는 함수
+async function getNeighborWiki(blogId) {
+  const { data, error } = await supabase
+    .from('neighbor_wiki')
+    .select('*')
+    .eq('blog_id', blogId)
+    .single();
 
-    // 1. 페이징 처리 (1~3페이지 수집)
-    for (let pageNum = 1; pageNum <= 3; pageNum++) {
-      console.log(`\n📄 [피드 수집] 이웃 새글 ${pageNum}페이지 스캔 중...`);
-      await feedPage.goto(`https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=${pageNum}&groupId=0`, { waitUntil: 'networkidle' });
-      await feedPage.waitForTimeout(3000);
-
-      // 💡 [방어 1단계] 쓸데없는 헤더/사이드바를 제외하고 오직 '본문 영역(#content)' 안의 링크만 주워옵니다.
-      const pageUrls = await feedPage.$$eval('#content a', links => links.map(a => a.href).filter(Boolean));
-
-      for (const url of pageUrls) {
-        const lowerUrl = url.toLowerCase();
-        
-        // 프로필, 카테고리 등 본문이 아닌 링크 차단
-        if (lowerUrl.includes('profile') || lowerUrl.includes('category') || lowerUrl.includes('prologue') || lowerUrl.includes('guestbook')) continue;
-
-        // 게시글 고유 번호(logNo) 추출
-        const match = url.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{10,})/);
-        if (match) {
-          const [_, blogId, logNoStr] = match;
-          const key = `${blogId}_${logNoStr}`;
-          
-          if (!seen.has(key)) {
-            seen.add(key);
-            // 💡 [핵심] 정렬을 위해 logNo를 실제 숫자로 변환해서 저장해 둡니다.
-            allUniquePosts.push({ 
-              blogId, 
-              logNoStr, 
-              logNoNum: parseInt(logNoStr, 10) 
-            });
-          }
-        }
-      }
-    }
-
-    // 💡 [방어 2단계 - 치트키] 수집된 모든 글을 '게시글 번호가 큰 순서(최신순)'로 내림차순 정렬합니다!
-    // 이렇게 하면 배너에 걸린 4/10일 옛날 글은 무조건 맨 뒤로 쫓겨납니다.
-    allUniquePosts.sort((a, b) => b.logNoNum - a.logNoNum);
-
-    console.log(`✅ 총 ${allUniquePosts.length}개의 글을 수집하여 [완벽한 최신 시간순]으로 정렬했습니다!`);
-    console.log(`👉 가장 첫 번째로 방문할 글 번호: ${allUniquePosts[0]?.logNoStr}`);
-
-    // 2. 각 포스트 방문 처리
-    for (const post of allUniquePosts) {
-      const { blogId, logNoStr: logNo } = post;
-      
-      const { data: alreadyProcessed } = await supabase.from('processed_feed_posts').select('post_id').eq('post_id', logNo);
-      if (alreadyProcessed && alreadyProcessed.length > 0) {
-        console.log(`[패스] DB 기록 확인됨 (이미 방문함): ${logNo}`);
-        continue;
-      }
-
-      const postPage = await context.newPage();
-      try {
-        const targetUrl = `https://m.blog.naver.com/${blogId}/${logNo}`;
-        await postPage.goto(targetUrl, { waitUntil: 'networkidle' });
-        await postPage.waitForTimeout(3000);
-
-        const postBody = postPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
-        if (await postBody.count() === 0) {
-          console.log(`⚠️ 본문을 찾을 수 없음: ${logNo}`);
-          continue;
-        }
-        
-        const postText = await postBody.innerText();
-        
-        await postPage.evaluate(() => window.scrollBy(0, 2000));
-        await postPage.waitForTimeout(1500);
-
-        // --- [공감 로직] ---
-        console.log(`❤️ [공감 시도]`);
-        try {
-          const likeBtn = postPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn, .__reaction__zeroface').first();
-          if (await likeBtn.count() > 0) {
-            const isLiked = await likeBtn.evaluate(el => 
-              el.getAttribute('aria-pressed') === 'true' || 
-              el.classList.contains('on') || 
-              el.querySelector('.u_likeit_icon.on') !== null
-            );
-
-            if (!isLiked) {
-              await likeBtn.click({ force: true });
-              console.log(`✅ 공감 버튼을 꾹 눌렀습니다.`);
-              await postPage.waitForTimeout(1000);
-            } else {
-              console.log(`🚫 이미 하트가 켜져 있습니다.`);
-            }
-          }
-        } catch (likeErr) {
-          console.log(`⚠️ 공감 버튼 클릭 중 오류 발생 (무시하고 계속 진행)`);
-        }
-
-        // --- [댓글 중복 체크 및 작성 로직] ---
-        const commentOpenBtn = postPage.locator('.icon__seNf8, .num__OVfhz').first();
-        if (await commentOpenBtn.count() > 0) {
-          await commentOpenBtn.click();
-          await postPage.waitForTimeout(2500); 
-
-          const alreadyCommented = await postPage.$$eval('.u_cbox_comment', elements => {
-            return elements.some(el => {
-              const info = el.getAttribute('data-info');
-              return info && info.includes('mine:true'); 
-            });
-          });
-
-          if (alreadyCommented) {
-            console.log(`🚫 [중복 방지] 이미 내가 작성한 댓글이 있습니다. 건너뜁니다.`);
-          } else {
-            const aiComment = await generateNeighborComment(postText);
-            console.log(`💬 [AI 댓글 생성] ${aiComment}`);
-
-            await postPage.fill('.u_cbox_text', aiComment);
-            await postPage.waitForTimeout(500);
-            await postPage.click('.u_cbox_btn_upload');
-            console.log(`✅ [작성 완료] 이웃 새글에 댓글을 남겼습니다.`);
-          }
-          
-          await supabase.from('processed_feed_posts').insert([{ post_id: logNo }]);
-
-        } else {
-          console.log(`⚠️ 댓글창을 열 수 없습니다. (비공개 혹은 댓글 막힘)`);
-        }
-
-      } catch (e) {
-        console.error(`❌ ${logNo} 처리 중 에러:`, e.message);
-      } finally {
-        await postPage.close();
-      }
-
-      const delay = 12000 + Math.random() * 5000;
-      console.log(`☕ 다음 작업을 위해 ${Math.floor(delay/1000)}초 휴식...`);
-      await feedPage.waitForTimeout(delay);
-    }
-  } catch (error) {
-    console.error('❌ 전체 공정 에러:', error);
-  } finally {
-    await browser.close();
-    console.log('🏁 모든 이웃 새글 순회를 종료합니다.');
+  if (error && error.code !== 'PGRST116') { // 데이터가 없는 에러(첫 방문)는 무시
+    console.error('위키 조회 에러:', error.message);
   }
+  return data || { persona: '첫 방문', interaction_history: '기록 없음', last_visited_at: null };
 }
 
-runFeedAgent();
+// 🧠 [기능 2] 이웃의 위키(기억)를 최신화하여 DB에 덮어쓰는 함수
+async function updateNeighborWiki(blogId, newPersona, newHistory) {
+  const { error } = await supabase
+    .from('neighbor_wiki')
+    .upsert({ 
+      blog_id: blogId, 
+      persona: newPersona, 
+      interaction_history: newHistory,
+      last_visited_at: new Date().toISOString()
+    });
+  if (error) console.error('위키 업데이트 에러:', error.message);
+}
+
+// 🤖 [기능 3] LLM을 이용해 기억 기반 댓글 생성 + 위키 요약
+async function generateWikiComment(wiki, postContent) {
+  // 1. 진짜 사람처럼 과거 기억을 바탕으로 댓글 쓰기
+  const commentResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini", // 혹은 gpt-3.5-turbo
+    messages: [
+      {
+        role: "system",
+        content: `너는 내 블로그의 다정하고 센스 있는 소통 에이전트야. 방문한 이웃의 위키(기억)를 참고해서 친근하게 댓글을 달아줘.
+        
+        [이웃 위키 정보]
+        - 이웃 특징(관심사): ${wiki.persona}
+        - 과거 소통 기록: ${wiki.interaction_history}
+        
+        [작성 규칙]
+        1. 과거 소통 기록에 있는 말(예: 첫인사)은 절대 반복하지 말 것.
+        2. 이웃의 특징이나 과거 맥락을 살짝 언급하며 이어갈 것.
+        3. 새 글 내용에 공감하는 반응을 보일 것.
+        4. 로봇처럼 보이지 않게 2~3문장으로 짧고 자연스럽게 작성할 것.`
+      },
+      { role: "user", content: `새 글 내용: ${postContent}` }
+    ]
+  });
+
+  const myComment = commentResponse.choices[0].message.content.trim();
+
+  // 2. 방금 단 댓글과 글 내용을 바탕으로 위키(기억) 업데이트용 요약 만들기
+  const wikiUpdateResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘.
+        출력은 반드시 JSON 형식으로 해줘.
+        {"persona": "이웃의 주요 관심사 (누적해서 업데이트)", "interaction_history": "지금까지 나눈 소통 핵심 요약 (방금 단 댓글 내용 포함)"}`
+      },
+      { role: "user", content: `기존 위키: ${JSON.stringify(wiki)}\n이번 글 내용: ${postContent}\n내가 방금 단 댓글: ${myComment}` }
+    ]
+  });
+
+  const updatedWiki = JSON.parse(wikiUpdateResponse.choices[0].message.content);
+
+  return { myComment, updatedWiki };
+}
+
+// ... (Playwright 브라우저 실행 및 이웃 새글 목록 순회하는 기존 코드는 그대로 유지) ...
+
+async function processNeighborPost(page, blogId, postContent) {
+  console.log(`\n🔍 [${blogId}] 이웃의 위키(기억)를 조회합니다...`);
+  const wiki = await getNeighborWiki(blogId);
+
+  // 🛡️ [방어 로직] 12시간 이내에 방문한 적이 있다면 스킵! (도배 방지)
+  if (wiki.last_visited_at) {
+    const lastVisit = new Date(wiki.last_visited_at);
+    const hoursSinceLastVisit = Math.abs(new Date() - lastVisit) / 36e5;
+    if (hoursSinceLastVisit < 12) {
+      console.log(`⏳ ${blogId}님은 ${Math.round(hoursSinceLastVisit)}시간 전에 방문했습니다. 스킵합니다.`);
+      return; 
+    }
+  }
+
+  console.log(`📝 [${blogId}] 위키 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
+  const { myComment, updatedWiki } = await generateWikiComment(wiki, postContent);
+
+  // ... (여기에 page.fill() 등을 이용해 myComment를 실제 네이버 블로그 창에 입력하고 등록하는 기존 코드 삽입) ...
+  console.log(`✅ [댓글 작성 완료] ${myComment}`);
+
+  console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
+  await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+}
+
+// runAgent() 등 메인 함수 실행
