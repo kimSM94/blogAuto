@@ -6,10 +6,9 @@ const { OpenAI } = require('openai');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ==========================================
-// 🧠 1부: LLM Wiki (기억 장치) 로직
-// ==========================================
-
+// ====================================================================
+// 🧠 [LLM Wiki 두뇌] 이웃의 위키(기억) 로직
+// ====================================================================
 async function getNeighborWiki(blogId) {
   const { data, error } = await supabase
     .from('neighbor_wiki')
@@ -36,6 +35,7 @@ async function updateNeighborWiki(blogId, newPersona, newHistory) {
 }
 
 async function generateWikiComment(wiki, postContent) {
+  // 1. 진짜 사람처럼 과거 기억을 바탕으로 맞춤형 댓글 쓰기
   const commentResponse = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -59,13 +59,15 @@ async function generateWikiComment(wiki, postContent) {
 
   const myComment = commentResponse.choices[0].message.content.trim();
 
+  // 2. 방금 단 댓글과 글 내용을 바탕으로 위키(기억) 업데이트용 요약 만들기
   const wikiUpdateResponse = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     response_format: { type: "json_object" },
     messages: [
       {
         role: "system",
-        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘. 출력은 반드시 JSON 형식으로 해줘.
+        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘.
+        출력은 반드시 JSON 형식으로 해줘.
         {"persona": "이웃의 주요 관심사 (누적해서 업데이트)", "interaction_history": "지금까지 나눈 소통 핵심 요약 (방금 단 댓글 내용 포함)"}`
       },
       { role: "user", content: `기존 위키: ${JSON.stringify(wiki)}\n이번 글 내용: ${postContent}\n내가 방금 단 댓글: ${myComment}` }
@@ -76,93 +78,175 @@ async function generateWikiComment(wiki, postContent) {
   return { myComment, updatedWiki };
 }
 
-// ==========================================
-// 🏃‍♂️ 2부: 실제 네이버 블로그 접속 및 순회 로직
-// ==========================================
 
-async function processNeighborPost(page, blogId, postContent, postUrl) {
-  console.log(`\n🔍 [${blogId}] 이웃의 위키(기억)를 조회합니다...`);
-  const wiki = await getNeighborWiki(blogId);
-
-  // 🛡️ [방어 로직] 12시간 이내 방문 스킵
-  if (wiki.last_visited_at) {
-    const lastVisit = new Date(wiki.last_visited_at);
-    const hoursSinceLastVisit = Math.abs(new Date() - lastVisit) / 36e5;
-    if (hoursSinceLastVisit < 12) {
-      console.log(`⏳ ${blogId}님은 ${Math.round(hoursSinceLastVisit)}시간 전에 방문했습니다. 스킵합니다.`);
-      return; 
-    }
-  }
-
-  console.log(`📝 [${blogId}] 위키 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
-  const { myComment, updatedWiki } = await generateWikiComment(wiki, postContent);
-
-  // 해당 포스트로 이동하여 댓글 달기 (모바일 버전 기준)
-  console.log(`🚀 [${blogId}] 포스트로 이동하여 댓글을 작성합니다.`);
-  await page.goto(postUrl, { waitUntil: 'domcontentloaded' });
-  
-  try {
-    // 댓글 창 열기 및 입력 (네이버 블로그 모바일 UI 기준)
-    await page.waitForSelector('.btn_reply', { timeout: 5000 });
-    await page.click('.btn_reply');
-    await page.waitForSelector('.u_cbox_text', { timeout: 5000 });
-    await page.fill('.u_cbox_text', myComment);
-    
-    // 등록 버튼 클릭 (실제 봇 가동 시 아래 주석 해제)
-    await page.click('.u_cbox_btn_upload'); 
-    await page.waitForTimeout(2000); 
-
-    console.log(`✅ [댓글 작성 완료] ${myComment}`);
-
-    console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
-    await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
-  } catch (err) {
-    console.log(`❌ [${blogId}] 댓글 창을 찾을 수 없거나 에러가 발생했습니다. (댓글 막힘 등)`);
-  }
-}
-
+// ====================================================================
+// 🏃‍♂️ [본체] 이웃 새글 순회 및 작업 에이전트
+// ====================================================================
 async function runFeedAgent() {
-  console.log("🌟 [이웃새글] 피드 자동화 에이전트 시작...");
+  console.log('🌟 [이웃새글] 피드 자동화 에이전트 시작...');
   
-  // 깃허브 액션 환경을 위한 headless 설정
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  // 🚨 깃허브 실행을 위한 headless 모드 강제 적용!
+  const browser = await chromium.launch({ 
+    headless: true, 
+    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
   }); 
-  const context = await browser.newContext({
-      storageState: 'state.json' // 로그인 세션 유지
-  });
-  const page = await context.newPage();
+  const context = await browser.newContext({ storageState: 'state.json' });
+  const feedPage = await context.newPage();
 
   try {
-    // 네이버 모바일 이웃 피드 접속
-    console.log("🌐 네이버 이웃 피드에 접속합니다...");
-    await page.goto('https://m.blog.naver.com/FeedList.naver', { waitUntil: 'networkidle' });
-    await page.waitForTimeout(3000);
+    let allUniquePosts = [];
+    const seen = new Set();
 
-    // 피드 목록 가져오기
-    const feedItems = await page.$$('.item.post._feed_item');
-    console.log(`총 ${feedItems.length}개의 최신 글을 발견했습니다.`);
+    // 1. 페이징 처리 (1~3페이지 수집 - 회원님의 완벽한 원본 로직)
+    for (let pageNum = 1; pageNum <= 4; pageNum++) {
+      console.log(`\n📄 [피드 수집] 이웃 새글 ${pageNum}페이지 스캔 중...`);
+      await feedPage.goto(`https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=${pageNum}&groupId=0`, { waitUntil: 'networkidle' });
+      await feedPage.waitForTimeout(3000);
 
-    for (let item of feedItems) {
-      // 작성자 아이디, 포스트 링크, 글 내용 추출
-      const blogId = await item.getAttribute('data-blog-id');
-      const postUrl = await item.getAttribute('data-link');
-      const postContent = await item.innerText();
+      const pageUrls = await feedPage.$$eval('#content a', links => links.map(a => a.href).filter(Boolean));
 
-      if (blogId && postUrl) {
-        // 위키 봇에게 일거리 넘겨주기
-        await processNeighborPost(page, blogId, postContent, postUrl);
+      for (const url of pageUrls) {
+        const lowerUrl = url.toLowerCase();
+        
+        if (lowerUrl.includes('profile') || lowerUrl.includes('category') || lowerUrl.includes('prologue') || lowerUrl.includes('guestbook')) continue;
+
+        const match = url.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{10,})/);
+        if (match) {
+          const [_, blogId, logNoStr] = match;
+          const key = `${blogId}_${logNoStr}`;
+          
+          if (!seen.has(key)) {
+            seen.add(key);
+            allUniquePosts.push({ 
+              blogId, 
+              logNoStr, 
+              logNoNum: parseInt(logNoStr, 10) 
+            });
+          }
+        }
       }
     }
 
+    allUniquePosts.sort((a, b) => b.logNoNum - a.logNoNum);
+
+    console.log(`✅ 총 ${allUniquePosts.length}개의 글을 수집하여 [완벽한 최신 시간순]으로 정렬했습니다!`);
+
+    // 2. 각 포스트 방문 및 위키/공감/댓글 처리
+    for (const post of allUniquePosts) {
+      const { blogId, logNoStr: logNo } = post;
+      
+      // 🛡️ [위키 방어 로직] 12시간 이내에 방문한 적이 있다면 진입조차 하지 않고 스킵!
+      const wiki = await getNeighborWiki(blogId);
+      if (wiki.last_visited_at) {
+        const lastVisit = new Date(wiki.last_visited_at);
+        const hoursSinceLastVisit = Math.abs(new Date() - lastVisit) / 36e5;
+        if (hoursSinceLastVisit < 12) {
+          console.log(`⏳ [${blogId}]님은 ${Math.round(hoursSinceLastVisit)}시간 전에 방문했습니다. (도배 방지 스킵)`);
+          continue; 
+        }
+      }
+
+      // 🛡️ [DB 방어 로직] 이미 처리한 글 번호인지 확인
+      const { data: alreadyProcessed } = await supabase.from('processed_feed_posts').select('post_id').eq('post_id', logNo);
+      if (alreadyProcessed && alreadyProcessed.length > 0) {
+        console.log(`[패스] DB 기록 확인됨 (이미 방문함): ${logNo}`);
+        continue;
+      }
+
+      const postPage = await context.newPage();
+      try {
+        const targetUrl = `https://m.blog.naver.com/${blogId}/${logNo}`;
+        await postPage.goto(targetUrl, { waitUntil: 'networkidle' });
+        await postPage.waitForTimeout(3000);
+
+        const postBody = postPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
+        if (await postBody.count() === 0) {
+          console.log(`⚠️ 본문을 찾을 수 없음: ${logNo}`);
+          continue;
+        }
+        
+        const postText = await postBody.innerText();
+        
+        await postPage.evaluate(() => window.scrollBy(0, 2000));
+        await postPage.waitForTimeout(1500);
+
+        // --- [공감 로직 (원본 유지)] ---
+        console.log(`❤️ [공감 시도]`);
+        try {
+          const likeBtn = postPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn, .__reaction__zeroface').first();
+          if (await likeBtn.count() > 0) {
+            const isLiked = await likeBtn.evaluate(el => 
+              el.getAttribute('aria-pressed') === 'true' || 
+              el.classList.contains('on') || 
+              el.querySelector('.u_likeit_icon.on') !== null
+            );
+
+            if (!isLiked) {
+              await likeBtn.click({ force: true });
+              console.log(`✅ 공감 버튼을 꾹 눌렀습니다.`);
+              await postPage.waitForTimeout(1000);
+            } else {
+              console.log(`🚫 이미 하트가 켜져 있습니다.`);
+            }
+          }
+        } catch (likeErr) {
+          console.log(`⚠️ 공감 버튼 클릭 중 오류 발생 (무시하고 계속 진행)`);
+        }
+
+        // --- [댓글 중복 체크 및 위키 기반 작성 로직] ---
+        const commentOpenBtn = postPage.locator('.icon__seNf8, .num__OVfhz').first();
+        if (await commentOpenBtn.count() > 0) {
+          await commentOpenBtn.click();
+          await postPage.waitForTimeout(2500); 
+
+          const alreadyCommented = await postPage.$$eval('.u_cbox_comment', elements => {
+            return elements.some(el => {
+              const info = el.getAttribute('data-info');
+              return info && info.includes('mine:true'); 
+            });
+          });
+
+          if (alreadyCommented) {
+            console.log(`🚫 [중복 방지] 이미 내가 작성한 댓글이 있습니다. 건너뜁니다.`);
+          } else {
+            console.log(`📝 [${blogId}] 위키(기억) 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
+            
+            // 💡 [핵심 교체] 기존 AI 댓글 대신 위키 전용 댓글 함수 호출!
+            const { myComment, updatedWiki } = await generateWikiComment(wiki, postText);
+            console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
+
+            await postPage.fill('.u_cbox_text', myComment);
+            await postPage.waitForTimeout(500);
+            await postPage.click('.u_cbox_btn_upload');
+            console.log(`✅ [작성 완료] 이웃 새글에 댓글을 남겼습니다.`);
+
+            // 💾 [핵심 추가] 성공적으로 댓글을 달았다면, 이웃 위키(기억) 업데이트 저장!
+            console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
+            await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+          }
+          
+          await supabase.from('processed_feed_posts').insert([{ post_id: logNo }]);
+
+        } else {
+          console.log(`⚠️ 댓글창을 열 수 없습니다. (비공개 혹은 댓글 막힘)`);
+        }
+
+      } catch (e) {
+        console.error(`❌ ${logNo} 처리 중 에러:`, e.message);
+      } finally {
+        await postPage.close();
+      }
+
+      const delay = 12000 + Math.random() * 5000;
+      console.log(`☕ 다음 작업을 위해 ${Math.floor(delay/1000)}초 휴식...`);
+      await feedPage.waitForTimeout(delay);
+    }
   } catch (error) {
-    console.error("🚨 에러 발생:", error);
+    console.error('❌ 전체 공정 에러:', error);
   } finally {
     await browser.close();
-    console.log("✅ 모든 작업을 마치고 브라우저를 종료합니다.");
+    console.log('🏁 모든 이웃 새글 순회를 종료합니다.');
   }
 }
 
-// 프로그램 실행 버튼! (이게 있어야 작동합니다)
 runFeedAgent();
