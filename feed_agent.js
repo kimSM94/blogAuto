@@ -34,48 +34,44 @@ async function updateNeighborWiki(blogId, newPersona, newHistory) {
   if (error) console.error('위키 업데이트 에러:', error.message);
 }
 
+// 🤖 [기능 3] LLM을 이용해 기억 기반 댓글 생성 + 위키 요약 (✨토큰 최적화 버전)
 async function generateWikiComment(wiki, postContent) {
-  // 1. 진짜 사람처럼 과거 기억을 바탕으로 맞춤형 댓글 쓰기
-  const commentResponse = await openai.chat.completions.create({
+  // 💡 토큰 절약 1: 글 내용이 아무리 길어도 핵심인 앞부분 1000자만 잘라서 넘깁니다.
+  const shortContent = postContent.length > 1000 ? postContent.substring(0, 1000) + "..." : postContent;
+
+  // 💡 토큰 절약 2: 두 번 하던 질문을 한 번으로 합쳐서 통째로 받아옵니다.
+  const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
+    response_format: { type: "json_object" }, // 무조건 JSON으로 답변하도록 강제
     messages: [
       {
         role: "system",
-        content: `너는 내 블로그의 다정하고 센스 있는 소통 에이전트야. 방문한 이웃의 위키(기억)를 참고해서 친근하게 댓글을 달아줘.
+        content: `너는 내 블로그의 다정하고 센스 있는 소통 에이전트야. 방문한 이웃의 위키(기억)를 참고해서 친근하게 댓글을 달고, 위키 정보를 최신화해줘.
         
         [이웃 위키 정보]
         - 이웃 특징(관심사): ${wiki.persona}
         - 과거 소통 기록: ${wiki.interaction_history}
         
-        [작성 규칙]
-        1. 과거 소통 기록에 있는 말(예: 첫인사)은 절대 반복하지 말 것.
-        2. 이웃의 특징이나 과거 맥락을 살짝 언급하며 이어갈 것.
-        3. 새 글 내용에 공감하는 반응을 보일 것.
-        4. 로봇처럼 보이지 않게 2~3문장으로 짧고 자연스럽게 작성할 것.`
+        [출력 규칙 (반드시 아래 JSON 형식으로 출력할 것)]
+        {
+          "myComment": "과거 소통을 참고하여 새 글에 공감하는 자연스럽고 짧은 2~3문장의 댓글 (첫인사 등 했던 말 반복 금지)",
+          "persona": "이웃의 주요 관심사 (기존 정보에 누적해서 업데이트)",
+          "interaction_history": "이전 소통 기록과 방금 네가 작성한 myComment를 합친 핵심 요약 (토큰 낭비를 막기 위해 3문장 이내로 짧게 압축할 것)"
+        }`
       },
-      { role: "user", content: `새 글 내용: ${postContent}` }
+      { role: "user", content: `새 글 내용: ${shortContent}` }
     ]
   });
 
-  const myComment = commentResponse.choices[0].message.content.trim();
+  const result = JSON.parse(response.choices[0].message.content);
 
-  // 2. 방금 단 댓글과 글 내용을 바탕으로 위키(기억) 업데이트용 요약 만들기
-  const wikiUpdateResponse = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `방금 이웃의 글을 읽고 댓글을 달았어. 이 이웃에 대한 위키(기억)를 최신화해줘.
-        출력은 반드시 JSON 형식으로 해줘.
-        {"persona": "이웃의 주요 관심사 (누적해서 업데이트)", "interaction_history": "지금까지 나눈 소통 핵심 요약 (방금 단 댓글 내용 포함)"}`
-      },
-      { role: "user", content: `기존 위키: ${JSON.stringify(wiki)}\n이번 글 내용: ${postContent}\n내가 방금 단 댓글: ${myComment}` }
-    ]
-  });
-
-  const updatedWiki = JSON.parse(wikiUpdateResponse.choices[0].message.content);
-  return { myComment, updatedWiki };
+  return { 
+    myComment: result.myComment, 
+    updatedWiki: { 
+      persona: result.persona, 
+      interaction_history: result.interaction_history 
+    } 
+  };
 }
 
 

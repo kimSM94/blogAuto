@@ -8,7 +8,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const BLOG_ID = 'kakaoadd'; 
 
-
 // 1. 내 블로그용 AI 두뇌
 async function generateReply(commentText) {
   const response = await openai.chat.completions.create({
@@ -30,12 +29,16 @@ async function generateReply(commentText) {
       }
     ],
     temperature: 0.7, 
+    max_tokens: 100, // 💡 [최적화] AI가 쓸데없이 길게 말해서 토큰을 낭비하는 것을 강제 차단!
   });
   return response.choices[0].message.content.trim();
 }
 
 // 2. 이웃 블로그용 AI 두뇌
 async function generateNeighborComment(postText) {
+  // 💡 [최적화] 1500자에서 800자로 대폭 축소! (어차피 앞부분만 읽어도 맥락 파악은 충분합니다)
+  const shortText = postText.length > 800 ? postText.substring(0, 800) : postText;
+
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
@@ -50,10 +53,11 @@ async function generateNeighborComment(postText) {
       },
       {
         role: "user",
-        content: `다음은 이웃 블로그의 최신 포스팅 본문입니다. 읽고 공감하는 댓글을 달아주세요: \n\n"${postText.substring(0, 1500)}"` 
+        content: `다음은 이웃 블로그의 최신 포스팅 본문입니다. 읽고 공감하는 댓글을 달아주세요: \n\n"${shortText}"` 
       }
     ],
     temperature: 0.7, 
+    max_tokens: 100, // 💡 [최적화] 쓸데없는 인사말이나 꼬리말을 길게 생성하지 못하도록 차단!
   });
   return response.choices[0].message.content.trim();
 }
