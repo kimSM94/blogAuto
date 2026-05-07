@@ -18,7 +18,7 @@ jobs:
       - name: ⚙️ Node.js 세팅 (버전 20)
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: '22'
           
       - name: 📦 패키지 설치
         run: npm install
