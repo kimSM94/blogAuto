@@ -36,6 +36,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
+        
+          npm install playwright @supabase/supabase-js openai dotenv
+          npx playwright install chromium --with-deps
+
           echo "=== 1부: 내 블로그 답글 달기 시작 ==="
           node reply_agent.js
           
