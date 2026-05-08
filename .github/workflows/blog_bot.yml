@@ -8,11 +8,7 @@ on:
     - cron: '0 11 * * *' # 매일 UTC 11:00 (한국 저녁)
     - cron: '0 0 1 * *'  # 💡 추가: 매월 1일 UTC 00:00 (한국 시간 오전 9시) 대청소용!
   workflow_dispatch:
-    inputs:
-          bot_type:
-            description: '실행할 봇 종류'
-            required: true
-            default: 'all'
+
 jobs:
   run-blog-bot:
     runs-on: ubuntu-latest
@@ -54,13 +50,12 @@ jobs:
       # 🧹 신규: 한 달에 한 번 도는 이웃 대청소 에이전트
       # =================================================================
       - name: 🧹 월간 이웃 대청소 에이전트 실행
-        if: github.event.schedule == '0 0 1 * *' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        if: github.event.schedule == '0 0 1 * *' || github.event_name == 'workflow_dispatch'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "=== 3부: 월간 이웃 대청소 시작 ==="
           node clean_agent.js
-<<<<<<< HEAD
           
       # =================================================================
       # 🏰 신규: 이틀에 한 번 도는 서이추 문지기 실행
@@ -72,5 +67,3 @@ jobs:
         run: |
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
-=======
->>>>>>> f07782f8b70de3f8d89d16bef30a37ea25d1ec1d
