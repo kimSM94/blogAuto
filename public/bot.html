@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>봇 실행</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    body { font-family: 'Pretendard', sans-serif; background-color: #F2F4F6; -webkit-tap-highlight-color: transparent; }
+    /* 앱처럼 보이게 스크롤바 숨기기 */
+    ::-webkit-scrollbar { display: none; }
+  </style>
+</head>
+<body class="flex justify-center min-h-screen">
+
+  <!-- 📱 스마트폰 화면 컨테이너 -->
+  <div class="w-full max-w-md bg-white min-h-screen flex flex-col relative shadow-lg">
+    
+    <!-- 🟢 상단 네비게이션 바 (앱 헤더) -->
+    <div class="flex items-center justify-between px-2 h-14 border-b border-gray-100 sticky top-0 bg-white z-10">
+      <a href="/" class="p-3 text-[#333D4B] active:bg-gray-100 rounded-full transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </a>
+      <h1 id="headerTitle" class="text-[16px] font-bold text-[#191F28]">봇 실행</h1>
+      <div class="w-12"></div> <!-- 중앙 정렬을 위한 여백 -->
+    </div>
+
+    <!-- 🟢 메인 콘텐츠 영역 -->
+    <div class="flex-grow flex flex-col p-6 pb-32">
+      
+      <!-- 봇 아이콘 및 설명 -->
+      <div class="flex flex-col items-center mt-4 mb-8 text-center">
+        <div id="botIcon" class="w-[72px] h-[72px] rounded-[22px] flex items-center justify-center text-[36px] mb-4 bg-gray-50 shadow-[0_2px_8px_rgba(0,0,0,0.04)]">🤖</div>
+        <h2 id="botTitle" class="text-[22px] font-bold text-[#191F28] tracking-tight mb-2">봇 준비 중</h2>
+        <p id="botDesc" class="text-[14px] text-[#505967] break-keep font-medium leading-relaxed">데이터를 불러오고 있습니다.</p>
+      </div>
+
+      <!-- 실시간 로그 영역 -->
+      <div class="flex-grow flex flex-col min-h-[200px]">
+        <h3 class="text-[13px] font-bold text-[#8B95A1] mb-2 px-1">실시간 작업 로그</h3>
+        <div id="botLogArea" class="flex-grow bg-[#191F28] text-[#00FF41] p-4 rounded-[16px] text-[13px] font-mono overflow-y-auto whitespace-pre-wrap leading-relaxed shadow-inner">실행을 대기 중입니다.</div>
+      </div>
+
+    </div>
+
+    <!-- 🟢 하단 고정 실행 버튼 (토스 송금 버튼 스타일) -->
+    <div class="fixed bottom-0 w-full max-w-md bg-white p-5 pb-8 border-t border-gray-100 shadow-[0_-4px_16px_rgba(0,0,0,0.02)]">
+      <button id="runBtn" onclick="startBot()" class="w-full py-[16px] bg-[#3182F6] active:bg-[#1B64DA] text-white text-[17px] font-bold rounded-[16px] transition-colors shadow-sm">
+        지금 실행하기
+      </button>
+    </div>
+
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const botType = urlParams.get('type');
+    let eventSource = null;
+
+    const botInfo = {
+      gatekeeper: { title: '서이추 문지기', desc: '광고 신청을 단호하게 거절하고\n진짜 이웃만 수락할게요.', icon: '🏰', color: 'bg-[#F2F3FF]' },
+      clean: { title: '월간 이웃 대청소', desc: '내 이웃 목록을 꼼꼼하게 스캔하여\n광고 계정을 찾아낼게요.', icon: '🧹', color: 'bg-[#FFF0F0]' }
+    };
+
+    const currentBot = botInfo[botType];
+    
+    if (currentBot) {
+      document.getElementById('headerTitle').innerText = currentBot.title;
+      document.getElementById('botTitle').innerText = currentBot.title;
+      document.getElementById('botDesc').innerText = currentBot.desc;
+      document.getElementById('botIcon').innerText = currentBot.icon;
+      document.getElementById('botIcon').className = `w-[72px] h-[72px] rounded-[22px] flex items-center justify-center text-[36px] mb-4 shadow-[0_2px_8px_rgba(0,0,0,0.04)] ${currentBot.color}`;
+    }
+
+    function startBot() {
+      const logArea = document.getElementById('botLogArea');
+      const runBtn = document.getElementById('runBtn');
+      
+      // 실행 중 (토스 라이트 블루 스타일)
+      runBtn.disabled = true;
+      runBtn.innerText = '열심히 일하는 중...';
+      runBtn.className = 'w-full py-[16px] bg-[#E8F3FF] text-[#3182F6] text-[17px] font-bold rounded-[16px] cursor-not-allowed transition-colors';
+
+      logArea.innerText = `[${currentBot.title}] 봇 기동 준비 중... ⏳\n(작업이 끝날 때까지 화면을 끄지 마세요!)\n`;
+      
+      if (eventSource) eventSource.close();
+
+      eventSource = new EventSource(`/api/stream-bot?type=${botType}`);
+
+      eventSource.onmessage = function(event) {
+        logArea.innerText += event.data + '\n';
+        logArea.scrollTop = logArea.scrollHeight; 
+      };
+
+      eventSource.addEventListener('done', function() {
+        eventSource.close();
+        logArea.innerText += `\n✅ 모든 작업이 깔끔하게 끝났습니다!\n`;
+        logArea.scrollTop = logArea.scrollHeight;
+        resetButton();
+      });
+
+      eventSource.onerror = function(error) {
+        logArea.innerText += `\n❌ 서버와 연결이 끊겼거나 오류가 발생했습니다.\n`;
+        eventSource.close();
+        resetButton();
+      };
+    }
+
+    function resetButton() {
+      const runBtn = document.getElementById('runBtn');
+      runBtn.disabled = false;
+      runBtn.innerText = '다시 실행하기';
+      runBtn.className = 'w-full py-[16px] bg-[#3182F6] active:bg-[#1B64DA] text-white text-[17px] font-bold rounded-[16px] transition-colors shadow-sm';
+    }
+  </script>
+</body>
+</html>

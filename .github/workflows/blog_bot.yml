@@ -56,3 +56,14 @@ jobs:
         run: |
           echo "=== 3부: 월간 이웃 대청소 시작 ==="
           node clean_agent.js
+          
+      # =================================================================
+      # 🏰 신규: 이틀에 한 번 도는 서이추 문지기 실행
+      # =================================================================
+      - name: 🏰 서이추 문지기 실행 (이틀 주기)
+        if: github.event.schedule == '0 15 */2 * *' || github.event_name == 'workflow_dispatch'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "=== 4부: 서이추 문지기 시작 ==="
+          node gatekeeper_agent.js
