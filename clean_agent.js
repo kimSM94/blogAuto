@@ -41,7 +41,7 @@ async function checkIsAd(blogInfo) {
 
 async function runCleaner() {
   console.log('🧹 [이웃 대청소 봇] 작동을 시작합니다...');
-  const browser = await chromium.launch({ headless: false }); 
+  const browser = await chromium.launch({ headless: true }); 
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 

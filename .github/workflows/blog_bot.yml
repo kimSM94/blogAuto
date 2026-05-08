@@ -8,7 +8,11 @@ on:
     - cron: '0 11 * * *' # 매일 UTC 11:00 (한국 저녁)
     - cron: '0 0 1 * *'  # 💡 추가: 매월 1일 UTC 00:00 (한국 시간 오전 9시) 대청소용!
   workflow_dispatch:
-
+    inputs:
+          bot_type:
+            description: '실행할 봇 종류'
+            required: true
+            default: 'all'
 jobs:
   run-blog-bot:
     runs-on: ubuntu-latest
