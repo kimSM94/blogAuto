@@ -58,8 +58,12 @@
     const botType = urlParams.get('type');
 
     const botInfo = {
+      
       gatekeeper: { title: '서이추 문지기', desc: '광고 신청을 단호하게 거절하고\n진짜 이웃만 수락할게요.', icon: '🏰', color: 'bg-[#F2F3FF]' },
-      clean: { title: '월간 이웃 대청소', desc: '내 이웃 목록을 꼼꼼하게 스캔하여\n광고 계정을 찾아낼게요.', icon: '🧹', color: 'bg-[#FFF0F0]' }
+      clean: { title: '월간 이웃 대청소', desc: '내 이웃 목록을 꼼꼼하게 스캔하여\n광고 계정을 찾아낼게요.', icon: '🧹', color: 'bg-[#FFF0F0]' },
+      // 👇 새로 추가된 부분!
+      organize: { title: '유령 이웃 정리', desc: '1년 넘게 새 글이 없는 서로이웃을\n일반 이웃으로 변경합니다.', icon: '👻', color: 'bg-[#F4F4F6]' }
+    
     };
 
     const currentBot = botInfo[botType];

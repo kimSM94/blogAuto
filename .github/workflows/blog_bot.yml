@@ -78,3 +78,15 @@ jobs:
         run: |
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
+      # =================================================================
+      # 👻 4. 유령 이웃 정리 (수동 호출)
+      # =================================================================
+      - name: 👻 유령 이웃 정리 실행
+        if: github.event_name == 'workflow_dispatch' && inputs.bot_type == 'organize'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "=== 5부: 유령 이웃 정리 시작 ==="
+          node organize_agent.js
