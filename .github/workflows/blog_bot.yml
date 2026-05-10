@@ -6,13 +6,15 @@ on:
   schedule:
     - cron: '30 3 * * *' # 매일 UTC 03:30 (한국 점심)
     - cron: '0 11 * * *' # 매일 UTC 11:00 (한국 저녁)
-    - cron: '0 0 1 * *'  # 💡 추가: 매월 1일 UTC 00:00 (한국 시간 오전 9시) 대청소용!
+    - cron: '0 0 1 * *'  # 매월 1일 UTC 00:00 (한국 시간 오전 9시) 대청소용!
+    - cron: '0 15 */2 * *' # 이틀에 한 번 서이추 문지기용! (스케줄 추가)
   workflow_dispatch:
     inputs:
       bot_type:
         description: '실행할 봇 종류'
         required: true
         default: 'all'
+
 jobs:
   run-blog-bot:
     runs-on: ubuntu-latest
@@ -35,10 +37,11 @@ jobs:
         run: echo '${{ secrets.NAVER_STATE_JSON }}' > state.json
         
       # =================================================================
-      # 🚀 기존: 매일 2회 도는 점심/저녁 에이전트 (답글 & 피드 순회)
+      # 🚀 1. 점심/저녁 에이전트 (답글 & 피드 순회)
       # =================================================================
       - name: 🚀 점심/저녁 에이전트 실행
-        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        # 💡 수정: 스케줄이거나, push했거나, 수동 버튼 중 'all'을 불렀을 때만!
+        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'all')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -51,10 +54,11 @@ jobs:
           node feed_agent.js
 
       # =================================================================
-      # 🧹 신규: 한 달에 한 번 도는 이웃 대청소 에이전트
+      # 🧹 2. 월간 이웃 대청소 에이전트
       # =================================================================
       - name: 🧹 월간 이웃 대청소 에이전트 실행
-        if: github.event.schedule == '0 0 1 * *' || github.event_name == 'workflow_dispatch'
+        # 💡 수정: 매월 1일이거나, 폰에서 'clean' 버튼을 눌렀을 때만!
+        if: github.event.schedule == '0 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'clean')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
@@ -62,10 +66,11 @@ jobs:
           node clean_agent.js
           
       # =================================================================
-      # 🏰 신규: 이틀에 한 번 도는 서이추 문지기 실행
+      # 🏰 3. 서이추 문지기 실행
       # =================================================================
       - name: 🏰 서이추 문지기 실행 (이틀 주기)
-        if: github.event.schedule == '0 15 */2 * *' || github.event_name == 'workflow_dispatch'
+        # 💡 수정: 이틀 주기 스케줄이거나, 폰에서 'gatekeeper' 버튼을 눌렀을 때만!
+        if: github.event.schedule == '0 15 */2 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'gatekeeper')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
