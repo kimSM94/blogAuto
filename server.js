@@ -12,7 +12,7 @@ app.use(express.json());
 
 // 💡 핵심 2: 처음에 접속( / )하면 무조건 대문(home.html)을 보여주도록 설정합니다!
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'home.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // =======================================================
