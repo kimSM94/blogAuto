@@ -68,6 +68,8 @@ jobs:
         if: github.event.schedule == '0 15 */2 * *' || github.event_name == 'workflow_dispatch'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
