@@ -149,6 +149,26 @@ async function runCleaner() {
       }
     }
 
+    // 🚀 텔레그램 보고 기능 (여기를 추가하세요!)
+    try {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      const chatId = process.env.TELEGRAM_CHAT_ID;
+      
+      if (botToken && chatId) {
+        const message = `🤖 [서이추 문지기] 작업이 완료되었습니다!\n(확인하러 가기: 네이버 블로그 앱)`;
+        // 대청소 봇에는 `🤖 [월간 이웃 대청소] 작업 완료!`로 글자만 바꿔주세요.
+
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message })
+        });
+        console.log("✅ 텔레그램 보고 완료!");
+      }
+    } catch (e) {
+      console.log("❌ 텔레그램 보고 실패:", e.message);
+    }
+    
   } catch (error) {
     console.error('❌ 에러:', error);
   } finally {
