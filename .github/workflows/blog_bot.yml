@@ -2,7 +2,7 @@ name: Naver Blog Automation Agent
 
 on:
   push: # 💡 파일이 올라오면 강제로 스케줄러를 깨우는 알람입니다!
-    branches: [ main, master ]
+    branches:
   schedule:
     - cron: '30 3 * * *' # 매일 UTC 03:30 (한국 점심)
     - cron: '0 11 * * *' # 매일 UTC 11:00 (한국 저녁)
@@ -41,7 +41,7 @@ jobs:
       # =================================================================
       - name: 🚀 점심/저녁 에이전트 실행
         # 💡 수정: 스케줄이거나, push했거나, 수동 버튼 중 'all'을 불렀을 때만!
-        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'all')
+        if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'all')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -79,14 +79,16 @@ jobs:
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
       # =================================================================
-      # 👻 4. 유령 이웃 정리 (수동 호출)
+      # 👻 4. 유령 이웃 정리 (매월 1일 자동 & 수동 호출)
       # =================================================================
       - name: 👻 유령 이웃 정리 실행
-        if: github.event_name == 'workflow_dispatch' && inputs.bot_type == 'organize'
+        # 💡 수정: 매월 1일 스케줄이거나, 수동으로 'organize' 버튼을 눌렀을 때 실행!
+        if: github.event.schedule == '0 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'organize')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }} # 💡 환경변수 누락된 것 추가!
         run: |
           echo "=== 5부: 유령 이웃 정리 시작 ==="
           node organize_agent.js

@@ -166,27 +166,42 @@ async function runFeedAgent() {
         await postPage.evaluate(() => window.scrollBy(0, 2000));
         await postPage.waitForTimeout(1500);
 
-        // --- [공감 로직 (원본 유지)] ---
+// --- [공감 로직 (플로팅 바 전용 맞춤 수정본)] ---
         console.log(`❤️ [공감 시도]`);
         try {
-          const likeBtn = postPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn, .__reaction__zeroface').first();
+          // 💡 회원님이 직접 찾아주신 '하단 플로팅 바'의 정확한 공감 버튼 주소 적용!
+          const likeBtnSelector = '#floating_bottom .area_sympathy a.u_likeit_button, a.u_likeit_button._face';
+          const likeBtn = postPage.locator(likeBtnSelector).first();
+
           if (await likeBtn.count() > 0) {
+            // 플로팅 버튼은 화면 아래에 고정되어 있지만, 혹시 모를 클릭 씹힘을 방지하기 위해 강제 포커싱
+            await likeBtn.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+            await postPage.waitForTimeout(1000);
+
+            // 💡 회원님이 주신 HTML의 'on' 클래스와 'aria-pressed="true"' 값을 기반으로 깐깐하게 체크!
             const isLiked = await likeBtn.evaluate(el => 
               el.getAttribute('aria-pressed') === 'true' || 
               el.classList.contains('on') || 
-              el.querySelector('.u_likeit_icon.on') !== null
+              el.querySelector('.__reaction__like[style*="z-index: 2"]') !== null // 내부 아이콘 상태까지 체크
             );
 
-            if (!isLiked) {
-              await likeBtn.click({ force: true });
-              console.log(`✅ 공감 버튼을 꾹 눌렀습니다.`);
-              await postPage.waitForTimeout(1000);
+          if (!isLiked) {
+              // 💡 [수정됨] 자바스크립트 가짜 클릭을 버리고, Playwright의 '진짜 물리 클릭' 사용!
+              // force: true (가려져 있어도 강제 클릭) / delay: 100 (0.1초 동안 꾹 누르고 떼기 - 터치스크린 흉내)
+              await likeBtn.click({ force: true, delay: 150 });
+              
+              console.log(`✅ 공감 버튼을 사람처럼 꾹~ 눌렀습니다.`);
+              
+              // 💡 네이버 서버에 하트가 등록될 때까지 충분히 기다려줍니다.
+              await postPage.waitForTimeout(2000); 
             } else {
               console.log(`🚫 이미 하트가 켜져 있습니다.`);
             }
+          } else {
+            console.log(`⚠️ 공감 버튼을 화면에서 찾을 수 없습니다.`);
           }
         } catch (likeErr) {
-          console.log(`⚠️ 공감 버튼 클릭 중 오류 발생 (무시하고 계속 진행)`);
+          console.log(`⚠️ 공감 버튼 클릭 중 오류 발생: ${likeErr.message}`);
         }
 
         // --- [댓글 중복 체크 및 위키 기반 작성 로직] ---
