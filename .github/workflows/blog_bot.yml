@@ -4,10 +4,11 @@ on:
   push: # 💡 파일이 올라오면 강제로 스케줄러를 깨우는 알람입니다!
     branches:
   schedule:
-    - cron: '30 3 * * *' # 매일 UTC 03:30 (한국 점심)
-    - cron: '0 11 * * *' # 매일 UTC 11:00 (한국 저녁)
-    - cron: '0 0 1 * *'  # 매월 1일 UTC 00:00 (한국 시간 오전 9시) 대청소용!
-    - cron: '0 15 */2 * *' # 이틀에 한 번 서이추 문지기용! (스케줄 추가)
+    - cron: '30 3 * * *'  # 매일 UTC 03:30 (한국 점심 - 답글/피드)
+    - cron: '0 11 * * *'  # 매일 UTC 11:00 (한국 저녁 - 답글/피드)
+    - cron: '0 0 1 * *'   # 매월 1일 UTC 00:00 (한국 오전 9시 - 대청소/유령정리)
+    - cron: '0 23 * * *'  # [신규] 매일 UTC 23:00 (한국 오전 8시 - 서이추 문지기)
+    - cron: '0 9 * * *'   # [신규] 매일 UTC 09:00 (한국 오후 6시 - 서이추 문지기)
   workflow_dispatch:
     inputs:
       bot_type:
@@ -40,7 +41,6 @@ jobs:
       # 🚀 1. 점심/저녁 에이전트 (답글 & 피드 순회)
       # =================================================================
       - name: 🚀 점심/저녁 에이전트 실행
-        # 💡 수정: 스케줄이거나, push했거나, 수동 버튼 중 'all'을 불렀을 때만!
         if: github.event.schedule == '30 3 * * *' || github.event.schedule == '0 11 * * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'all')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -57,7 +57,6 @@ jobs:
       # 🧹 2. 월간 이웃 대청소 에이전트
       # =================================================================
       - name: 🧹 월간 이웃 대청소 에이전트 실행
-        # 💡 수정: 매월 1일이거나, 폰에서 'clean' 버튼을 눌렀을 때만!
         if: github.event.schedule == '0 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'clean')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -66,29 +65,29 @@ jobs:
           node clean_agent.js
           
       # =================================================================
-      # 🏰 3. 서이추 문지기 실행
+      # 🏰 3. 서이추 문지기 실행 (매일 오전 8시 / 오후 6시 2회 작동)
       # =================================================================
-      - name: 🏰 서이추 문지기 실행 (이틀 주기)
-        # 💡 수정: 이틀 주기 스케줄이거나, 폰에서 'gatekeeper' 버튼을 눌렀을 때만!
-        if: github.event.schedule == '0 15 */2 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'gatekeeper')
+      - name: 🏰 서이추 문지기 실행
+        if: github.event.schedule == '0 23 * * *' || github.event.schedule == '0 9 * * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'gatekeeper')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }} # 💡 문지기용 환경변수 인젝션
         run: |
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
+          
       # =================================================================
       # 👻 4. 유령 이웃 정리 (매월 1일 자동 & 수동 호출)
       # =================================================================
       - name: 👻 유령 이웃 정리 실행
-        # 💡 수정: 매월 1일 스케줄이거나, 수동으로 'organize' 버튼을 눌렀을 때 실행!
         if: github.event.schedule == '0 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.bot_type == 'organize')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }} # 💡 환경변수 누락된 것 추가!
+          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }}
         run: |
           echo "=== 5부: 유령 이웃 정리 시작 ==="
           node organize_agent.js

@@ -1,168 +1,238 @@
 const { chromium } = require('playwright');
+const fs = require('fs');
+const { OpenAI } = require('openai'); 
 require('dotenv').config();
 
-// 💡 1. 본인의 네이버 아이디 (오타가 없는지 한 번만 쓱 확인해 주세요!)
 const BLOG_ID = process.env.NAVER_BLOG_ID || 'kakaoadd'; 
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+// 🤖 GPT-4o-mini 스팸 판별 (블로그명 + 메시지 종합 분석)
+async function checkSpam(nickname, message) {
+    if (!openai || !message) return 'PASS'; 
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "당신은 네이버 블로그 서로이웃 신청 스팸 필터입니다. 신청자의 [블로그명(닉네임)]과 [메시지]를 종합적으로 분석하여 상업적 광고(성형외과, 병원, 부동산, 마케팅, 물건 판매 등) 목적의 계정인지 판별하세요. 상업적 광고라면 오직 'SPAM'이라고 대답하고, 일반 사용자거나 기본 멘트라면 오직 'PASS'라고만 대답하세요." },
+                { role: "user", content: `[블로그명]: ${nickname}\n[메시지]: ${message}` }
+            ],
+            temperature: 0.1,
+        });
+        return response.choices[0].message.content.trim().toUpperCase() === 'SPAM' ? 'SPAM' : 'PASS';
+    } catch (e) {
+        console.error("⚠️ OpenAI API 에러:", e.message);
+        return 'PASS'; 
+    }
+}
 
 (async () => {
-  console.log("👻 [유령 이웃 정리 봇] 작동을 시작합니다...");
+  console.log("🏰 [서이추 문지기 봇] OpenAI 닉네임/메시지 필터링 가동! 정문 방어를 시작합니다...");
 
-  // 💡 로컬 테스트용 (화면 보임)
+  const stateFile = 'state.json';
+  const hasState = fs.existsSync(stateFile);
+
   const browser = await chromium.launch({ 
-    headless: false, 
+    headless: true, // 💡 실서버(GitHub)에 올릴 땐 꼭 true로 변경하세요!
     args: ['--no-sandbox', '--disable-setuid-sandbox'] 
   }); 
   
   const context = await browser.newContext({
-    storageState: 'state.json', // 네이버 로그인 세션
+    storageState: hasState ? stateFile : undefined,
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   });
   
   const page = await context.newPage();
 
+  // 브라우저 기본 알림창 자동 확인 (거절 누를 때 뜨는 알림창 처리용)
+  page.on('dialog', async dialog => {
+      console.log(`💬 네이버 알림창 확인: "${dialog.message()}" -> 자동 허용`);
+      await dialog.accept();
+  });
+
   try {
-    // =======================================================================
-    // 🛡️ [경로 수정 완료] clean_agent.js 방식의 가장 안전한 정문 접속!
-    // =======================================================================
-    console.log(`▶ [${BLOG_ID}] 블로그 관리자 홈으로 안전하게 진입합니다...`);
-    
-    // 💡 ?blogId= 파라미터를 빼고 순수하게 아이디만 넣는 것이 네이버의 최신 정식 주소입니다.
     await page.goto(`https://admin.blog.naver.com/${BLOG_ID}`, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000); 
-
-    if (page.url().includes('error')) {
-      throw new Error("❌ 접속 권한 에러! (state.json 로그인이 풀렸거나 아이디가 다릅니다)");
+    
+    if (page.url().includes('nidlogin')) {
+      console.log("🚨 로그인 필요 (60초 대기)");
+      await page.waitForTimeout(60000); 
+      await context.storageState({ path: stateFile });
+      await page.goto(`https://admin.blog.naver.com/${BLOG_ID}`, { waitUntil: 'networkidle' });
     }
 
-    // 💡 봇이 사람처럼 왼쪽 메뉴에서 [이웃·그룹 관리]를 직접 찾아 누릅니다.
-    console.log("▶ 왼쪽 메뉴에서 [이웃·그룹 관리]를 클릭합니다...");
-    const buddyMenu = page.locator('a:has-text("이웃·그룹 관리"), a[href*="ManageBuddy"]').first();
-    await buddyMenu.click();
+    console.log("▶ 좌측 메뉴에서 [서로이웃 신청] 엘리먼트를 정확히 타격합니다...");
     
-    // 프레임 안의 데이터가 뜰 때까지 넉넉히 대기
-    await page.waitForTimeout(3000); 
-    console.log("✅ 이웃 관리 페이지 로딩 성공!");
+    try {
+        await page.waitForSelector('#buddyinvite_config_anchor', { timeout: 5000 });
+        await page.locator('#buddyinvite_config_anchor').click();
+    } catch (e) {
+        console.log("⚠️ 클릭 실패! 네이버 순정 JS 함수로 다이렉트 호출합니다.");
+        await page.evaluate(() => {
+            adminMain.GotoPage('https://admin.blog.naver.com/BuddyInviteReceivedManage.naver', false);
+        });
+    }
+    
+    await page.waitForTimeout(5000); 
 
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    console.log(`▶ 기준 날짜: ${oneYearAgo.toLocaleDateString()} 이전 글만 있는 계정 강등 처리 시작`);
-    
-    // =======================================================================
-    // 🔄 프레임 뚫기 및 2단계 강등(관계만 변경) 로직 시작
-    // =======================================================================
-    
-    // 💡 네이버 관리자는 진짜 알맹이가 'mainFrame'이라는 껍데기 안에 숨어있습니다.
-    const frame = page.frame({ name: 'mainFrame' });
-    if (!frame) throw new Error("❌ 메인 프레임을 찾을 수 없습니다.");
-
-    let downgradedCount = 0; 
     let currentPage = 1;
-    let hasNextPage = true;
+    let hasMorePages = true;
+    let totalAccepted = 0;
+    let totalRejected = 0;
 
-    while (hasNextPage) {
-      console.log(`\n📄 [${currentPage}페이지] 유령 이웃 스캔 중...`);
-      await page.waitForTimeout(2000); 
+    while (hasMorePages) {
+        console.log(`\n==================================================`);
+        console.log(`📄 [받은 신청 - ${currentPage}페이지] 스캔 및 AI 분석 중...`);
+        console.log(`==================================================`);
 
-      // 이제 page가 아니라 frame 안에서 이웃 목록을 찾습니다!
-      const neighbors = await frame.$$('table.buddy_list tbody tr, #buddyList tbody tr'); 
-
-      let targetFoundOnPage = false;
-
-      for (const neighbor of neighbors) {
-        const tds = await neighbor.$$('td');
-        if (tds.length < 5) continue; 
-
-        const checkbox = await neighbor.$('input[type="checkbox"]');
-        if (!checkbox) continue;
-
-        // 최근 글 업데이트 날짜 칸 (보통 맨 끝에서 두 번째)
-        const dateText = await tds[tds.length - 2].innerText().catch(() => '');
-        const cleanDateText = dateText.trim();
-
-        let isGhost = false;
-
-        // 👻 유령 탐지 로직
-        if (cleanDateText === '') {
-          isGhost = true;
-          console.log(`👻 유령 발견! (작성글 아예 없음)`);
-        } else if (cleanDateText.includes('전') || cleanDateText.includes('어제')) {
-          isGhost = false; 
-        } else {
-          const parsedDateStr = cleanDateText.replace(/\./g, '-').replace(/-$/, '').trim();
-          const postDate = new Date(parsedDateStr);
-          
-          if (!isNaN(postDate) && postDate < oneYearAgo) {
-            isGhost = true;
-            console.log(`👻 유령 발견! (마지막 글: ${cleanDateText})`);
-          }
+        let targetFrame = null;
+        for (let attempt = 1; attempt <= 10; attempt++) {
+            for (const f of page.frames()) {
+                if (await f.$('table.table4')) { 
+                    targetFrame = f; 
+                    break; 
+                }
+            }
+            if (targetFrame) break;
+            await page.waitForTimeout(1000); 
         }
 
-        if (isGhost) {
-          await checkbox.check();
-          targetFoundOnPage = true;
-          downgradedCount++;
-        }
-      }
+        if (!targetFrame) throw new Error("❌ 신청 목록 테이블(table.table4)을 찾을 수 없습니다.");
 
-      // 유령이 선택되었으면 [삭제 -> 관계만 변경] 수행
-      if (targetFoundOnPage) {
-        console.log(`🔄 이 페이지에서 발견된 유령 이웃을 [서로이웃 -> 이웃]으로 강등합니다.`);
+        const rows = await targetFrame.$$('table.table4 tbody tr'); 
+        if (rows.length === 0) {
+            console.log("✅ 현재 화면에 스캔할 신청자가 없습니다.");
+            break;
+        }
         
-        const deleteBtn = frame.locator('a, button').filter({ hasText: /^삭제$/ }).first();
-        await deleteBtn.click();
-        await page.waitForTimeout(1500); 
+        let currentTargetAction = null; 
+        let targetCount = 0;
 
-        try {
-          // 팝업 라디오 버튼 "관계만 변경" 클릭
-          const radioLabel = frame.locator('label').filter({ hasText: '관계만 변경' }).first();
-          await radioLabel.click();
-          await page.waitForTimeout(500);
+        for (let i = 0; i < rows.length; i++) {
+            const checkbox = await rows[i].$('input[type="checkbox"]');
+            if (!checkbox) continue; 
+            
+            const nameText = await rows[i].$eval('td:nth-child(2)', el => el.innerText.replace(/\n/g, ' ').trim()).catch(() => '');
+            const msgText = await rows[i].$eval('td:nth-child(3)', el => el.innerText.trim()).catch(() => '');
+            
+            if (nameText.includes('신청한 사람') || !nameText) continue;
 
-          // 팝업 "확인" 클릭
-          const confirmBtn = frame.locator('.ly_popup a, .layer_popup a, button').filter({ hasText: /^확인$/ }).last();
-          await confirmBtn.click();
-          console.log("✅ 관계 변경 완료!");
-          
-          await page.waitForTimeout(2500); 
-        } catch (popupErr) {
-          console.log("⚠️ 팝업창 처리 중 문제 발생 (수동 확인 필요):", popupErr.message);
+            const decision = await checkSpam(nameText, msgText);
+            
+            if (currentTargetAction === null) currentTargetAction = decision;
+
+            if (decision === currentTargetAction) {
+                await checkbox.check();
+                targetCount++;
+                const emoji = decision === 'SPAM' ? '🚫 거절' : '✅ 수락';
+                console.log(`[${emoji}] ${nameText.padEnd(15)} | ${msgText.substring(0, 25).replace(/\n/g, ' ')}...`);
+            }
         }
-      } else {
-         console.log("✅ 이 페이지에는 1년 이상 잠수 탄 유령 이웃이 없습니다.");
-      }
 
-      // 다음 페이지 이동
-      const nextButton = await frame.$('.paginate a.next, .blog_paginate a.next'); 
-      if (nextButton) {
-        console.log("➡️ 다음 페이지로 넘어갑니다.");
-        await nextButton.click();
-        currentPage++;
-        await page.waitForTimeout(3000); 
-      } else {
-        hasNextPage = false;
-        console.log("🏁 마지막 페이지까지 완벽하게 스캔 완료!");
-      }
+        // =======================================================================
+        // ⚔️ 액션 실행: 새 창(Popup Window) 낚아채기 핵심 패치!
+        // =======================================================================
+        if (targetCount > 0) {
+            if (currentTargetAction === 'SPAM') {
+                console.log(`\n🗑️ 광고 계정 ${targetCount}명을 [거절] 처리합니다.`);
+                // 거절은 보통 기본 알림창(confirm)만 뜨고 새로고침 되므로 기존 창에서 진행
+                const rejectBtn = targetFrame.locator('.action2 a, .action2 button').filter({ hasText: /^거절$/ }).first();
+                await rejectBtn.click();
+                
+                totalRejected += targetCount;
+                await page.waitForTimeout(3000); // 처리 후 리스트 갱신 대기
+                continue; 
+
+            } else {
+                console.log(`\n🎉 일반 유저 ${targetCount}명을 [수락] 처리합니다.`);
+                const acceptBtn = targetFrame.locator('.action2 a, .action2 button').filter({ hasText: /^수락$/ }).first();
+                
+                console.log("👉 새 창(팝업 브라우저)이 뜨기를 기다립니다...");
+                let popupWindow = null;
+                
+                try {
+                    // 💡 [핵심] 수락 버튼을 누름과 동시에 "새로운 팝업창"이 열리는 이벤트를 낚아챕니다!
+                    [popupWindow] = await Promise.all([
+                        page.waitForEvent('popup', { timeout: 8000 }), 
+                        acceptBtn.click()
+                    ]);
+                } catch (e) {
+                    console.log("⚠️ 새 창을 감지하지 못했습니다. 기존 레이어로 폴백합니다.");
+                }
+
+                if (popupWindow) {
+                    console.log("✅ 팝업창 낚아채기 성공! 팝업창 내부 조종을 시작합니다.");
+                    // 팝업창 내용이 다 불러와질 때까지 대기
+                    await popupWindow.waitForLoadState('domcontentloaded');
+                    await popupWindow.waitForTimeout(1000); // 렌더링 안정화 1초 대기
+
+                    // 💡 [선배님 경로 타격] 이제 기존 창이 아니라 '새로 뜬 팝업창' 안에서 버튼을 누릅니다!
+                    console.log("👉 팝업창 내부의 최종 승인 버튼(#footer input[type=image]) 타격!");
+                    const footerBtn = popupWindow.locator('#footer input[type="image"]').first();
+                    await footerBtn.waitFor({ state: 'attached', timeout: 5000 });
+                    await footerBtn.click();
+                    
+                    console.log(" -> ✅ 수락 승인 완벽 성공!");
+                } else {
+                    // (만약 네이버가 새 창이 아니라 인페이지 레이어로 띄웠을 경우를 대비한 예비책)
+                    console.log("👉 기존 프레임 내부에서 버튼을 찾습니다.");
+                    await targetFrame.evaluate(() => {
+                        const btn = document.querySelector('#footer input[type="image"]');
+                        if (btn) btn.click();
+                    });
+                }
+
+                totalAccepted += targetCount;
+                await page.waitForTimeout(4000); // 팝업 닫히고 본 창 리스트 갱신 대기
+                continue; 
+            }
+        }
+
+        // =======================================================================
+        // 🛡️ 다음 페이지 이동
+        // =======================================================================
+        const targetNextPage = currentPage + 1;
+        const hasNext = await targetFrame.evaluate((nextNum) => {
+            const paginateDivs = document.querySelectorAll('.paginate, .blog_paginate, div.paginate');
+            if (paginateDivs.length === 0) return false;
+            
+            let allLinks = [];
+            paginateDivs.forEach(div => allLinks.push(...div.querySelectorAll('a')));
+            
+            const exactLink = allLinks.find(a => (a.href || '').includes(`goPage(${nextNum})`) || (a.getAttribute('onclick') || '').includes(`goPage(${nextNum})`));
+            if (exactLink) { goPage(nextNum); return true; }
+
+            const numBtn = allLinks.find(a => a.innerText.trim() === String(nextNum));
+            if (numBtn) { numBtn.click(); return true; }
+            
+            const nextArrow = allLinks.find(a => a.innerText.includes('다음') || (a.querySelector('img') && a.querySelector('img').alt.includes('다음')));
+            if (nextArrow) { nextArrow.click(); return true; }
+            
+            return false;
+        }, targetNextPage);
+
+        if (hasNext) {
+            console.log(`➡️ 다음 페이지로 이동합니다...`);
+            await page.waitForTimeout(4000); 
+            currentPage++;
+        } else {
+            console.log(`\n🏁 더 이상 대기 중인 신청이 없습니다!`);
+            hasMorePages = false;
+        }
     }
 
-    // 텔레그램 보고 전송
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
-    
     if (botToken && chatId) {
-      const message = `👻 [유령 이웃 정리] 작업 완료!\n1년 이상 글이 없는 서로이웃 ${downgradedCount}명을 일반 이웃으로 내렸습니다.`;
+      const msg = `🏰 [문지기 AI 보고서]\n- 수락된 일반 이웃: ${totalAccepted}명\n- 거절된 광고(스팸): ${totalRejected}명\n문지기 임무를 완벽하게 수행했습니다!`;
       await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: message })
+        body: JSON.stringify({ chat_id: chatId, text: msg })
       });
-      console.log(`✅ 텔레그램 보고 완료! (총 ${downgradedCount}명)`);
     }
 
   } catch (error) {
-    console.error("❌ 봇 실행 중 오류 발생:", error);
+    console.error("❌ 오류 발생:", error);
   } finally {
-    // 💡 테스트 후 창이 바로 꺼지는 게 불편하시면 주석(//) 처리하셔도 됩니다.
-    await browser.close();
-    console.log("👻 [유령 이웃 정리 봇] 테스트 종료.");
+    console.log("🏁 서이추 문지기 봇 작동 종료.");
   }
 })();
