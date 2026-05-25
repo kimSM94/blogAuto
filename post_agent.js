@@ -1,10 +1,9 @@
 require('dotenv').config();
 const { chromium } = require('playwright');
-const { OpenAI } = require('openai');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const BLOG_ID = 'kakaoadd'; // 👈 회원님의 네이버 아이디
+const BLOG_ID = process.env.NAVER_BLOG_ID || 'kakaoadd'; // 본인 네이버 아이디
 
+// 💡 바로 밑에 async function runPostAgent() { ... } 로 이어지면 됩니다!
 // ==========================================
 // 🧠 1부: 내 '찐 말투 규칙'을 주입하여 변수 작성
 // ==========================================
