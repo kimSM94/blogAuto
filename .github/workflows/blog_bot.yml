@@ -1,7 +1,7 @@
 name: Naver Blog Automation Agent
 
 on:
-  push: # 💡 파일이 올라오면 강제로 스케줄러를 깨우는 알람입니다!
+  push: 
     branches:
   schedule:
     - cron: '30 3 * * *'  # 매일 UTC 03:30 (한국 점심 - 답글/피드)
@@ -15,6 +15,25 @@ on:
         description: '실행할 봇 종류'
         required: true
         default: 'all'
+      # 💡 [추가됨] Cloudflare에서 보내는 치환용 데이터들을 받을 문을 열어줍니다!
+      param_title:
+        description: '블로그 제목'
+        required: false
+      param_intro:
+        description: '도입부'
+        required: false
+      param_info:
+        description: '가게 정보'
+        required: false
+      param_exterior:
+        description: '외부 전경'
+        required: false
+      param_taste:
+        description: '메뉴 및 맛평가'
+        required: false
+      param_outro:
+        description: '마무리 총평'
+        required: false
 
 jobs:
   run-blog-bot:
@@ -73,7 +92,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }} # 💡 문지기용 환경변수 인젝션
+          NAVER_BLOG_ID: ${{ secrets.NAVER_BLOG_ID }} 
         run: |
           echo "=== 4부: 서이추 문지기 시작 ==="
           node gatekeeper_agent.js
@@ -91,3 +110,20 @@ jobs:
         run: |
           echo "=== 5부: 유령 이웃 정리 시작 ==="
           node organize_agent.js
+
+      # =================================================================
+      # 📝 [신규] 5. 블로그 자동 포스팅 에이전트 (Cloudflare 연동)
+      # =================================================================
+      - name: 📝 블로그 포스팅 에이전트 실행
+        if: github.event_name == 'workflow_dispatch' && inputs.bot_type == 'blog_upload'
+        env:
+          # Cloudflare가 넘겨준 파라미터(inputs)를 Node.js 환경변수로 변환하여 꽂아줍니다!
+          AI_TITLE: ${{ inputs.param_title }}
+          AI_INTRO: ${{ inputs.param_intro }}
+          AI_INFO: ${{ inputs.param_info }}
+          AI_EXTERIOR: ${{ inputs.param_exterior }}
+          AI_TASTE: ${{ inputs.param_taste }}
+          AI_OUTRO: ${{ inputs.param_outro }}
+        run: |
+          echo "=== 6부: 템플릿 기반 블로그 자동 포스팅 시작 ==="
+          node post_agent.js
