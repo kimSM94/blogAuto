@@ -90,12 +90,17 @@ async function runAgent() {
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
+  // 💡 [수정] 페이지 기본 타임아웃을 30초 -> 60초로 넉넉하게 연장
+  page.setDefaultTimeout(60000);
+
   try {
     // -------------------------------------------------------------
     // 내 블로그 최신 글 번호 자동 추출 로직
     // -------------------------------------------------------------
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
-    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'networkidle' });
+    
+    // 💡 [수정] networkidle -> domcontentloaded 로 변경
+    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
     const latestLogNo = await page.evaluate((id) => {
@@ -128,7 +133,9 @@ async function runAgent() {
     // 찾은 최신 글 번호로 이동하여 기존 로직 수행
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
-    await page.goto(targetUrl, { waitUntil: 'networkidle' });
+    
+    // 💡 [수정] networkidle -> domcontentloaded 로 변경
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
@@ -141,7 +148,7 @@ async function runAgent() {
       console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다.');
     }
 
-    await page.waitForSelector('.u_cbox_comment', { timeout: 10000 });
+    await page.waitForSelector('.u_cbox_comment'); // (timeout 옵션 제거: 상단 setDefaultTimeout 적용됨)
     
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
@@ -263,7 +270,11 @@ async function runAgent() {
             console.log(`🚀 [답방 출발] 이웃(${neighborId})의 블로그 홈으로 이동합니다...`);
             
             const neighborPage = await context.newPage();
-            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'networkidle' });
+            // 💡 [수정] 이웃 페이지도 기본 타임아웃 60초 연장 적용
+            neighborPage.setDefaultTimeout(60000);
+            
+            // 💡 [수정] networkidle -> domcontentloaded 로 변경
+            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'domcontentloaded' });
             await neighborPage.waitForTimeout(3000); 
             
             let postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
@@ -301,7 +312,9 @@ async function runAgent() {
               if (latestPostUrl) {
                 console.log(`🔗 [답방 진입] 숫자가 가장 큰(진짜 최신) 게시글을 발견했습니다! 들어갑니다.`);
                 const fullUrl = latestPostUrl.startsWith('http') ? latestPostUrl : `https://m.blog.naver.com${latestPostUrl}`;
-                await neighborPage.goto(fullUrl, { waitUntil: 'networkidle' });
+                
+                // 💡 [수정] networkidle -> domcontentloaded 로 변경
+                await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
                 await neighborPage.waitForTimeout(3000);
                 
                 postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
