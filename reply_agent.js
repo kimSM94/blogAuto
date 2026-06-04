@@ -136,29 +136,32 @@ async function runAgent() {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
 
-    // =====================================================================
-    // 💡 [궁극의 스크롤 & 스캔] 내리면서 실시간으로 캡처본의 ID를 감시합니다!
-    // =====================================================================
-    console.log(`[동작] 화면을 내리면서 댓글 버튼(#Comi${POST_NO})이 뜨는지 실시간 감시합니다...`);
+    console.log(`[동작] 화면을 내리면서 숨겨진 댓글 버튼을 감시합니다...`);
     let isClicked = false;
 
-    // 최대 20번(약 10초) 동안 스크롤을 내리며 버튼을 찾습니다.
+    // =====================================================================
+    // 💡 [초강력 무기 추가] 회원님이 직접 찾아낸 blind 텍스트 셀렉터 장착!
+    // =====================================================================
+    const myBtnSelectors = [
+      'span:has-text("이 글에 댓글 단 블로거 열고 닫기")', // 💡 회원님이 찾은 특급 단서!
+      'span:has-text("댓글 단 블로거")',
+      `#Comi${POST_NO}`, 
+      'a.btn_comment', 
+      '.area_comment a[role="button"]'
+    ].join(', ');
+
     for (let i = 0; i < 20; i++) {
-      // 1. 사람처럼 부드럽게 한 칸(600px) 내리기
       await page.evaluate(() => window.scrollBy(0, 600));
-      // 2. 네이버가 렌더링할 시간 0.5초 주기
       await page.waitForTimeout(500); 
 
-      // 3. 버튼이 화면에 생겼는지 확인! (캡처본 기반 완벽한 셀렉터)
-      const btnLocator = page.locator(`#Comi${POST_NO}, a.btn_comment, .area_comment a[role="button"]`).first();
+      const btnLocator = page.locator(myBtnSelectors).first();
       
       if (await btnLocator.count() > 0) {
         console.log(`✅ [발견] ${i+1}번째 스크롤에서 댓글 버튼을 낚아챘습니다! 클릭!`);
-        // 가려져 있든 말든 무조건 강제 클릭
         await btnLocator.click({ force: true });
         isClicked = true;
-        await page.waitForTimeout(3000); // 댓글창 애니메이션 대기
-        break; // 찾았으니 스크롤 중단
+        await page.waitForTimeout(3000); 
+        break; 
       }
     }
 
@@ -293,7 +296,7 @@ async function runAgent() {
             
             let postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
             let isAlreadyInPost = await postBodyLocator.count() > 0;
-            let currentNeighborLogNo = null; // 이웃 글 번호 저장용
+            let currentNeighborLogNo = null;
 
             if (!isAlreadyInPost) {
               const latestPostUrl = await neighborPage.evaluate((id) => {
@@ -347,7 +350,6 @@ async function runAgent() {
               const neighborComment = await generateNeighborComment(postText);
               console.log(`💬 [이웃 블로그 AI 댓글] ${neighborComment}`);
 
-              // 공감 클릭 로직 생략 없이 그대로 둡니다
               try {
                 const likeBtn = neighborPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn').first();
                 if (await likeBtn.count() > 0) {
@@ -367,11 +369,13 @@ async function runAgent() {
                 }
               } catch (e) { console.log('⚠️ 공감 버튼 처리 중 오류'); }
 
-              // 💡 이웃 블로그에도 동일하게 실시간 스캔 기법 적용!
               console.log(`[동작] 이웃 블로그 화면을 내리면서 댓글 버튼을 찾습니다...`);
               let neighborClicked = false;
               
+              // 💡 이웃 블로그 방문 시에도 동일한 텍스트 타겟 추가!
               const neighborBtnSelectors = [
+                'span:has-text("이 글에 댓글 단 블로거 열고 닫기")',
+                'span:has-text("댓글 단 블로거")',
                 currentNeighborLogNo ? `#Comi${currentNeighborLogNo}` : null,
                 'a.btn_comment',
                 '.area_comment a[role="button"]'
@@ -383,6 +387,7 @@ async function runAgent() {
                 
                 const nbBtnLocator = neighborPage.locator(neighborBtnSelectors).first();
                 if (await nbBtnLocator.count() > 0) {
+                  console.log(`✅ [발견] 이웃 블로그 댓글 버튼을 낚아챘습니다!`);
                   await nbBtnLocator.click({ force: true });
                   neighborClicked = true;
                   await neighborPage.waitForTimeout(3000);
