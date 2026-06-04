@@ -90,7 +90,7 @@ async function runAgent() {
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
-  // 💡 [수정] 페이지 기본 타임아웃을 30초 -> 60초로 넉넉하게 연장
+  // 💡 페이지 기본 타임아웃을 30초 -> 60초로 넉넉하게 연장
   page.setDefaultTimeout(60000);
 
   try {
@@ -99,7 +99,6 @@ async function runAgent() {
     // -------------------------------------------------------------
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
     
-    // 💡 [수정] networkidle -> domcontentloaded 로 변경
     await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
@@ -130,35 +129,55 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
-    // 찾은 최신 글 번호로 이동하여 기존 로직 수행
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
     
-    // 💡 [수정] networkidle -> domcontentloaded 로 변경
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
-    console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+    // =====================================================================
+    // 💡 [수정] 사람처럼 마우스 휠 내리기 (점진적 스크롤) 적용 구역
+    // =====================================================================
+    console.log('[동작] 페이지 로딩 대기 및 사람처럼 스크롤 내리기...');
     try {
-      // 💡 [수정] 800px만 내리지 않고, 페이지 맨 밑바닥까지 끝까지 스크롤합니다!
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      });
-      
-      // 스크롤 후 네이버가 버튼을 그릴 시간을 2초 정도 줍니다.
-      await page.waitForTimeout(2000); 
+      await page.waitForTimeout(3000); 
 
-      // 💡 [수정] 대기 시간을 30초로 늘리고, 가려져 있어도 강제로 누르도록(force) 옵션을 추가합니다.
-      const btnSelector = '.icon__seNf8, .num__OVfhz';
-      await page.waitForSelector(btnSelector, { state: 'attached', timeout: 30000 });
+      await page.evaluate(async () => {
+        await new Promise((resolve) => {
+          let totalHeight = 0;
+          const distance = 400; // 한 번에 내릴 픽셀
+          
+          const timer = setInterval(() => {
+            const scrollHeight = document.body.scrollHeight;
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+
+            // 화면 끝까지 다 내려왔거나 제한선에 도달하면 타이머 종료
+            if (totalHeight >= scrollHeight || totalHeight > 15000) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 200); // 0.2초 대기
+        });
+      });
+
+      await page.waitForTimeout(2500); 
+
+      // 💡 다양한 클래스명 방어 로직 추가
+      const btnSelector = '.icon__seNf8, .num__OVfhz, a.btn_reply, a[class*="comment_btn"]';
+      await page.waitForSelector(btnSelector, { state: 'attached', timeout: 15000 });
       
       await page.locator(btnSelector).first().click({ force: true });
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-      await page.waitForTimeout(2500); 
+      await page.waitForTimeout(3000); 
+      
     } catch (e) {
       console.log('⚠️ 댓글 열기 버튼 대기/클릭 실패:', e.message);
+      console.log('⏩ 댓글이 없거나 막혀있는 것으로 판단하여 답글 작업을 스킵합니다.');
+      return; // 💡 여기서 함수를 부드럽게 종료하여 에러를 막습니다.
     }
+    // =====================================================================
 
-    await page.waitForSelector('.u_cbox_comment'); // (timeout 옵션 제거: 상단 setDefaultTimeout 적용됨)
+    await page.waitForSelector('.u_cbox_comment');
     
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
@@ -189,12 +208,8 @@ async function runAgent() {
       parsedComments.push({ commentNo, parentNo, replyLevel, isMine, isDeleted });
     }
 
-    // =====================================================================
-    // 💡 [신규 추가] DB에서 기억 꺼내오기
-    // =====================================================================
     const lastProcessedNo = await getLastProcessedCommentNo();
     let currentSessionMaxNo = lastProcessedNo;
-    // =====================================================================
 
     let index = 1;
     for (const comment of parsedComments) {
@@ -208,20 +223,15 @@ async function runAgent() {
         continue;
       }
 
-      // =====================================================================
-      // 💡 [신규 추가] 초고속 건너뛰기!
-      // =====================================================================
       const currentNoInt = parseInt(commentNo, 10);
       if (currentNoInt <= lastProcessedNo) {
         console.log(`⏩ [스킵] 이미 예전에 확인했던 옛날 댓글입니다. DB 조회 없이 넘어갑니다.`);
         continue;
       }
 
-      // 새로 발견한 가장 큰 숫자를 기록해둡니다.
       if (currentNoInt > currentSessionMaxNo) {
         currentSessionMaxNo = currentNoInt;
       }
-      // =====================================================================
 
       const commentLocator = page.locator(`.u_cbox_comment[data-info*="commentNo:'${commentNo}'"]`).first();
       if (await commentLocator.count() === 0) continue;
@@ -280,10 +290,8 @@ async function runAgent() {
             console.log(`🚀 [답방 출발] 이웃(${neighborId})의 블로그 홈으로 이동합니다...`);
             
             const neighborPage = await context.newPage();
-            // 💡 [수정] 이웃 페이지도 기본 타임아웃 60초 연장 적용
             neighborPage.setDefaultTimeout(60000);
             
-            // 💡 [수정] networkidle -> domcontentloaded 로 변경
             await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'domcontentloaded' });
             await neighborPage.waitForTimeout(3000); 
             
@@ -323,7 +331,6 @@ async function runAgent() {
                 console.log(`🔗 [답방 진입] 숫자가 가장 큰(진짜 최신) 게시글을 발견했습니다! 들어갑니다.`);
                 const fullUrl = latestPostUrl.startsWith('http') ? latestPostUrl : `https://m.blog.naver.com${latestPostUrl}`;
                 
-                // 💡 [수정] networkidle -> domcontentloaded 로 변경
                 await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
                 await neighborPage.waitForTimeout(3000);
                 
@@ -415,14 +422,9 @@ async function runAgent() {
       }
     }
 
-    // =====================================================================
-    // 💡 [신규 추가] 오늘 작업 끝! DB에 가장 큰 번호 덮어쓰기
-    // =====================================================================
     if (currentSessionMaxNo > lastProcessedNo) {
       await saveLastProcessedCommentNo(currentSessionMaxNo);
     }
-    // =====================================================================
-
     
   } catch (error) {
     console.error('❌ 실행 중 에러 발생:', error);
