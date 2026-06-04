@@ -139,13 +139,19 @@ async function runAgent() {
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      await page.evaluate(() => window.scrollBy(0, 800));
+      // 💡 [수정] 800px만 내리지 않고, 페이지 맨 밑바닥까지 끝까지 스크롤합니다!
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
       
-      // 💡 [수정] 버튼이 화면에 완전히 뜰 때까지 기다립니다 (최대 15초)
+      // 스크롤 후 네이버가 버튼을 그릴 시간을 2초 정도 줍니다.
+      await page.waitForTimeout(2000); 
+
+      // 💡 [수정] 대기 시간을 30초로 늘리고, 가려져 있어도 강제로 누르도록(force) 옵션을 추가합니다.
       const btnSelector = '.icon__seNf8, .num__OVfhz';
-      await page.waitForSelector(btnSelector, { state: 'visible', timeout: 15000 });
+      await page.waitForSelector(btnSelector, { state: 'attached', timeout: 30000 });
       
-      await page.locator(btnSelector).first().click();
+      await page.locator(btnSelector).first().click({ force: true });
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
       await page.waitForTimeout(2500); 
     } catch (e) {
