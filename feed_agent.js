@@ -87,6 +87,10 @@ async function runFeedAgent() {
     args: ['--no-sandbox', '--disable-setuid-sandbox'] 
   }); 
   const context = await browser.newContext({ storageState: 'state.json' });
+  
+  // 💡 [수정] 이 컨텍스트에서 열리는 모든 페이지의 기본 타임아웃을 60초로 넉넉하게 연장
+  context.setDefaultTimeout(60000);
+  
   const feedPage = await context.newPage();
 
   try {
@@ -96,7 +100,8 @@ async function runFeedAgent() {
     // 1. 페이징 처리 (1~3페이지 수집 - 회원님의 완벽한 원본 로직)
     for (let pageNum = 1; pageNum <= 4; pageNum++) {
       console.log(`\n📄 [피드 수집] 이웃 새글 ${pageNum}페이지 스캔 중...`);
-      await feedPage.goto(`https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=${pageNum}&groupId=0`, { waitUntil: 'networkidle' });
+      // 💡 [수정] networkidle -> domcontentloaded 로 변경
+      await feedPage.goto(`https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=${pageNum}&groupId=0`, { waitUntil: 'domcontentloaded' });
       await feedPage.waitForTimeout(3000);
 
       const pageUrls = await feedPage.$$eval('#content a', links => links.map(a => a.href).filter(Boolean));
@@ -152,7 +157,8 @@ async function runFeedAgent() {
       const postPage = await context.newPage();
       try {
         const targetUrl = `https://m.blog.naver.com/${blogId}/${logNo}`;
-        await postPage.goto(targetUrl, { waitUntil: 'networkidle' });
+        // 💡 [수정] networkidle -> domcontentloaded 로 변경
+        await postPage.goto(targetUrl, { waitUntil: 'domcontentloaded' });
         await postPage.waitForTimeout(3000);
 
         const postBody = postPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
@@ -205,7 +211,15 @@ async function runFeedAgent() {
         }
 
         // --- [댓글 중복 체크 및 위키 기반 작성 로직] ---
-        const commentOpenBtn = postPage.locator('.icon__seNf8, .num__OVfhz').first();
+        // 💡 [수정] 버튼이 렌더링될 때까지 기다리도록 방어 로직 추가 (1부의 에러 원인 차단)
+        const commentBtnSelector = '.icon__seNf8, .num__OVfhz';
+        try {
+          await postPage.waitForSelector(commentBtnSelector, { state: 'visible', timeout: 10000 });
+        } catch (e) {
+          // 버튼이 10초 내에 안 뜨면 그냥 넘어갑니다 (보통 댓글이 막혀있거나 지연이 심한 경우)
+        }
+
+        const commentOpenBtn = postPage.locator(commentBtnSelector).first();
         if (await commentOpenBtn.count() > 0) {
           await commentOpenBtn.click();
           await postPage.waitForTimeout(2500); 

@@ -140,12 +140,16 @@ async function runAgent() {
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
       await page.evaluate(() => window.scrollBy(0, 800));
-      await page.waitForTimeout(1000); 
-      await page.locator('.icon__seNf8, .num__OVfhz').first().click();
+      
+      // 💡 [수정] 버튼이 화면에 완전히 뜰 때까지 기다립니다 (최대 15초)
+      const btnSelector = '.icon__seNf8, .num__OVfhz';
+      await page.waitForSelector(btnSelector, { state: 'visible', timeout: 15000 });
+      
+      await page.locator(btnSelector).first().click();
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
       await page.waitForTimeout(2500); 
     } catch (e) {
-      console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다.');
+      console.log('⚠️ 댓글 열기 버튼 대기/클릭 실패:', e.message);
     }
 
     await page.waitForSelector('.u_cbox_comment'); // (timeout 옵션 제거: 상단 setDefaultTimeout 적용됨)
