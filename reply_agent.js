@@ -90,7 +90,7 @@ async function runAgent() {
   const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
-  // 💡 페이지 기본 타임아웃을 30초 -> 60초로 넉넉하게 연장
+  // 페이지 기본 타임아웃을 60초로 넉넉하게 연장
   page.setDefaultTimeout(60000);
 
   try {
@@ -129,76 +129,28 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
-    // const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
-    // console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
-    
-    // await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-
-    // =====================================================================
-    // 💡 [수정] 사람처럼 마우스 휠 내리기 (점진적 스크롤) 적용 구역
-    // =====================================================================
-    // console.log('[동작] 페이지 로딩 대기 및 사람처럼 스크롤 내리기...');
-    // try {
-    //   await page.waitForTimeout(3000); 
-
-    //   await page.evaluate(async () => {
-    //     await new Promise((resolve) => {
-    //       let totalHeight = 0;
-    //       const distance = 400; // 한 번에 내릴 픽셀
-          
-    //       const timer = setInterval(() => {
-    //         const scrollHeight = document.body.scrollHeight;
-    //         window.scrollBy(0, distance);
-    //         totalHeight += distance;
-
-    //         // 화면 끝까지 다 내려왔거나 제한선에 도달하면 타이머 종료
-    //         if (totalHeight >= scrollHeight || totalHeight > 15000) {
-    //           clearInterval(timer);
-    //           resolve();
-    //         }
-    //       }, 200); // 0.2초 대기
-    //     });
-    //   });
-
-    //   await page.waitForTimeout(2500); 
-
-    //   // 💡 다양한 클래스명 방어 로직 추가
-    //   const btnSelector = '.icon__seNf8, .num__OVfhz, a.btn_reply, a[class*="comment_btn"]';
-    //   await page.waitForSelector(btnSelector, { state: 'attached', timeout: 15000 });
-      
-    //   await page.locator(btnSelector).first().click({ force: true });
-    //   console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-    //   await page.waitForTimeout(3000); 
-      
-    // } catch (e) {
-    //   console.log('⚠️ 댓글 열기 버튼 대기/클릭 실패:', e.message);
-    //   console.log('⏩ 댓글이 없거나 막혀있는 것으로 판단하여 답글 작업을 스킵합니다.');
-    //   return; // 💡 여기서 함수를 부드럽게 종료하여 에러를 막습니다.
-    // }
-    // =====================================================================
-
     // =====================================================================
     // 💡 [궁극의 해결책] 본문 스킵하고 댓글창 전용 URL로 다이렉트 꽂아버리기!
     // =====================================================================
     const commentUrl = `https://m.blog.naver.com/CommentList.naver?blogId=${BLOG_ID}&logNo=${POST_NO}`;
     console.log(`[이동] 본문 스킵! 댓글창 전용 URL로 직행합니다: ${commentUrl}`);
     
-    // 댓글창 전용 페이지로 바로 접속합니다.
+    // 댓글창 전용 페이지로 바로 접속
     await page.goto(commentUrl, { waitUntil: 'domcontentloaded' });
     
-    // 네이버 서버에서 댓글 데이터를 불러올 때까지 넉넉히 3초 기다려줍니다.
+    // 네이버 서버에서 댓글 데이터를 불러올 때까지 넉넉히 대기
     await page.waitForTimeout(3000); 
-    // =====================================================================
 
-    // 👇 (이 아래부터는 기존 코드 그대로 유지)
-    await page.waitForSelector('.u_cbox_comment');
+    try {
+      // 댓글 요소가 화면에 나타날 때까지 기다립니다.
+      await page.waitForSelector('.u_cbox_comment', { timeout: 15000 });
+    } catch (e) {
+      console.log('⚠️ 댓글이 없거나 로딩되지 않았습니다. 넘어갑니다.');
+      // 댓글이 없어도 에러 내지 않고 아래 로직을 통과하도록 유도
+    }
+    // =====================================================================
     
-    const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
-      elements.map(el => el.getAttribute('data-info')).filter(info => info)
-    );
-    
-    await page.waitForSelector('.u_cbox_comment');
-    
+    // 댓글 데이터 추출 (rawDataInfos 선언은 오직 여기서 한 번만!)
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
     );
