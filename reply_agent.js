@@ -138,56 +138,66 @@ async function runAgent() {
     await page.waitForTimeout(3000);
 
     // =====================================================================
-    // 💡 [핵심 수정] 숨겨진 플로팅 바를 꺼내는 스마트 스크롤 로직!
+    // 💡 [초강력 수정] 화면에서 찾지 말고 자바스크립트로 직접 버튼의 명치를 찌릅니다!
     // =====================================================================
-    console.log('[동작] 아이폰 화면에서 밑으로 스크롤을 내립니다...');
+    console.log('[동작] 자연스럽게 스크롤을 내려 숨겨진 하단 바를 꺼냅니다...');
     await page.evaluate(async () => {
       await new Promise((resolve) => {
-        let lastScrollY = window.scrollY;
-        let unchangedCount = 0;
-        
+        let totalHeight = 0;
         const timer = setInterval(() => {
-          // 아래로 500픽셀씩 내리기
           window.scrollBy(0, 500);
-          
-          if (window.scrollY === lastScrollY) {
-            unchangedCount++;
-          } else {
-            unchangedCount = 0;
-            lastScrollY = window.scrollY;
-          }
-
-          // 화면 바닥에 닿았거나(2번 연속 스크롤 안 됨), 엄청 많이 내렸으면
-          if (unchangedCount >= 2 || window.scrollY > 8000) {
+          totalHeight += 500;
+          if (totalHeight > 5000 || window.scrollY + window.innerHeight >= document.body.scrollHeight) {
             clearInterval(timer);
-            // 💡 [핵심] 숨겨진 하단 플로팅 바를 꺼내기 위해 위로 살짝(300px) 올립니다!
-            window.scrollBy(0, -300); 
+            window.scrollBy(0, -400); // 하단 바 나오도록 위로 살짝 스크롤
             resolve();
           }
         }, 200);
       });
     });
-    // 스크롤 올린 뒤 플로팅 바가 애니메이션과 함께 나타날 시간을 줍니다.
     await page.waitForTimeout(2000);
 
+    console.log('💡 [동작] DOM 내부를 파고들어 하단 플로팅 바의 댓글 버튼을 직접 클릭합니다...');
+    const isClicked = await page.evaluate(() => {
+      // 1. 하단 고정 바(플로팅 바) 뼈대를 찾습니다.
+      const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
+      
+      if (floatingBar) {
+        const btns = floatingBar.querySelectorAll('a, button');
+        for (const btn of btns) {
+          const className = (btn.className || '').toString().toLowerCase();
+          const href = (btn.href || '').toString().toLowerCase();
+          
+          // 클래스나 주소에 comment/reply 단어가 있으면 100% 댓글 버튼! 냅다 누릅니다.
+          if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
+            btn.click();
+            return true;
+          }
+        }
+        // 혹시 이름이 바뀌었더라도, 네이버 블로그 모바일의 하단 바 2번째 버튼은 무조건 댓글입니다.
+        if (btns.length >= 2) {
+          btns[1].click();
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (!isClicked) {
+      console.log('⚠️ DOM에서조차 댓글 버튼을 찾을 수 없습니다. 댓글이 막혀있을 수 있습니다.');
+      return; 
+    }
+
+    console.log('✅ 댓글 버튼 강제 클릭 성공! 댓글창이 열리기를 기다립니다...');
+    
+    // 💡 [핵심 안전장치] 만약 달린 댓글이 0개라면 .u_cbox_comment가 존재하지 않습니다!
     try {
-      // 💡 로컬에서 작동했던 원래 클래스명 + 보험용 셀렉터 총동원
-      const btnSelector = '.icon__seNf8, .num__OVfhz, a[href*="comment" i], a:has-text("댓글")';
-      
-      // 버튼이 화면에 잡힐 때까지 최대 10초 대기
-      await page.waitForSelector(btnSelector, { state: 'attached', timeout: 10000 });
-      
-      const commentBtn = page.locator(btnSelector).first();
-      await commentBtn.click({ force: true });
-      console.log('✅ 하단 플로팅 바에서 댓글 버튼을 찾아 클릭했습니다!');
-      await page.waitForTimeout(3000);
+      await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
     } catch (e) {
-      console.log('⚠️ 댓글 버튼을 찾지 못했습니다. 에러:', e.message);
-      return;
+      console.log('⚠️ 아직 새 댓글이 없거나 로딩되지 않았습니다. (답글 달 대상이 없으므로 스킵합니다)');
+      return; // 에러 뿜지 말고 깔끔하게 종료!
     }
     // =====================================================================
-
-    await page.waitForSelector('.u_cbox_comment');
     
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
@@ -387,10 +397,26 @@ async function runAgent() {
               if (skipBecauseAlreadyLiked) {
                 await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
               } else {
-                const neighborCommentBtn = neighborPage.locator('.icon__seNf8, .num__OVfhz, a[href*="comment" i]').first();
                 
-                if (await neighborCommentBtn.count() > 0) {
-                  await neighborCommentBtn.click({ force: true });
+                // 💡 이웃 블로그에서도 동일하게 자바스크립트로 파고들어 냅다 클릭합니다!
+                const neighborClicked = await neighborPage.evaluate(() => {
+                  const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
+                  if (floatingBar) {
+                    const btns = floatingBar.querySelectorAll('a, button');
+                    for (const btn of btns) {
+                      const className = (btn.className || '').toString().toLowerCase();
+                      const href = (btn.href || '').toString().toLowerCase();
+                      if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
+                        btn.click();
+                        return true;
+                      }
+                    }
+                    if (btns.length >= 2) { btns[1].click(); return true; }
+                  }
+                  return false;
+                });
+                
+                if (neighborClicked) {
                   await neighborPage.waitForTimeout(3000); 
                   
                   const myCommentCount = await neighborPage.$$eval('.u_cbox_comment', elements => {
