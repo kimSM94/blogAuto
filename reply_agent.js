@@ -87,7 +87,6 @@ async function runAgent() {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   
-  // 💡 깃허브 서버를 '완벽한 아이폰'으로 세뇌시킵니다.
   const context = await browser.newContext({ 
     storageState: 'state.json',
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
@@ -137,19 +136,15 @@ async function runAgent() {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
 
-    // =====================================================================
-    // 💡 [초강력 수정] 화면에서 찾지 말고 자바스크립트로 직접 버튼의 명치를 찌릅니다!
-    // =====================================================================
-    console.log('[동작] 자연스럽게 스크롤을 내려 숨겨진 하단 바를 꺼냅니다...');
+    console.log('[동작] 본문 끝까지 부드럽게 스크롤을 내립니다...');
     await page.evaluate(async () => {
       await new Promise((resolve) => {
         let totalHeight = 0;
         const timer = setInterval(() => {
           window.scrollBy(0, 500);
           totalHeight += 500;
-          if (totalHeight > 5000 || window.scrollY + window.innerHeight >= document.body.scrollHeight) {
+          if (totalHeight > 8000 || window.scrollY + window.innerHeight >= document.body.scrollHeight) {
             clearInterval(timer);
-            window.scrollBy(0, -400); // 하단 바 나오도록 위로 살짝 스크롤
             resolve();
           }
         }, 200);
@@ -157,24 +152,33 @@ async function runAgent() {
     });
     await page.waitForTimeout(2000);
 
-    console.log('💡 [동작] DOM 내부를 파고들어 하단 플로팅 바의 댓글 버튼을 직접 클릭합니다...');
+    // =====================================================================
+    // 💡 [초강력 수정] 캡처해주신 HTML 구조를 1순위로 타격합니다!
+    // =====================================================================
+    console.log('💡 [동작] 회원님이 캡처해주신 HTML 구조를 바탕으로 댓글 버튼을 찌릅니다...');
     const isClicked = await page.evaluate(() => {
-      // 1. 하단 고정 바(플로팅 바) 뼈대를 찾습니다.
-      const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
+      // 1. [1순위] 캡처본에 있는 'btn_comment' 클래스나 'Comi...' 아이디를 직접 타격!
+      const directBtn = document.querySelector('a.btn_comment') || 
+                        document.querySelector('.area_comment a[role="button"]') ||
+                        document.querySelector('a[id^="Comi"]');
       
+      if (directBtn) {
+        directBtn.click();
+        return true;
+      }
+
+      // 2. [2순위] 혹시나 모바일 플로팅 바가 뜰 경우를 대비한 백업
+      const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
       if (floatingBar) {
         const btns = floatingBar.querySelectorAll('a, button');
         for (const btn of btns) {
-          const className = (btn.className || '').toString().toLowerCase();
-          const href = (btn.href || '').toString().toLowerCase();
-          
-          // 클래스나 주소에 comment/reply 단어가 있으면 100% 댓글 버튼! 냅다 누릅니다.
+          const className = (btn.className || '').toLowerCase();
+          const href = (btn.href || '').toLowerCase();
           if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
             btn.click();
             return true;
           }
         }
-        // 혹시 이름이 바뀌었더라도, 네이버 블로그 모바일의 하단 바 2번째 버튼은 무조건 댓글입니다.
         if (btns.length >= 2) {
           btns[1].click();
           return true;
@@ -189,15 +193,14 @@ async function runAgent() {
     }
 
     console.log('✅ 댓글 버튼 강제 클릭 성공! 댓글창이 열리기를 기다립니다...');
+    // =====================================================================
     
-    // 💡 [핵심 안전장치] 만약 달린 댓글이 0개라면 .u_cbox_comment가 존재하지 않습니다!
     try {
       await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
     } catch (e) {
       console.log('⚠️ 아직 새 댓글이 없거나 로딩되지 않았습니다. (답글 달 대상이 없으므로 스킵합니다)');
-      return; // 에러 뿜지 말고 깔끔하게 종료!
+      return; 
     }
-    // =====================================================================
     
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
@@ -397,15 +400,22 @@ async function runAgent() {
               if (skipBecauseAlreadyLiked) {
                 await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
               } else {
-                
-                // 💡 이웃 블로그에서도 동일하게 자바스크립트로 파고들어 냅다 클릭합니다!
+                // 이웃 블로그 방문 시에도 동일한 캡처본 로직을 적용합니다!
                 const neighborClicked = await neighborPage.evaluate(() => {
+                  const directBtn = document.querySelector('a.btn_comment') || 
+                                    document.querySelector('.area_comment a[role="button"]') ||
+                                    document.querySelector('a[id^="Comi"]');
+                  if (directBtn) {
+                    directBtn.click();
+                    return true;
+                  }
+                  
                   const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
                   if (floatingBar) {
                     const btns = floatingBar.querySelectorAll('a, button');
                     for (const btn of btns) {
-                      const className = (btn.className || '').toString().toLowerCase();
-                      const href = (btn.href || '').toString().toLowerCase();
+                      const className = (btn.className || '').toLowerCase();
+                      const href = (btn.href || '').toLowerCase();
                       if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
                         btn.click();
                         return true;
