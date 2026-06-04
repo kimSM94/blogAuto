@@ -136,63 +136,36 @@ async function runAgent() {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
 
-    console.log('[동작] 본문 끝까지 부드럽게 스크롤을 내립니다...');
-    await page.evaluate(async () => {
-      await new Promise((resolve) => {
-        let totalHeight = 0;
-        const timer = setInterval(() => {
-          window.scrollBy(0, 500);
-          totalHeight += 500;
-          if (totalHeight > 8000 || window.scrollY + window.innerHeight >= document.body.scrollHeight) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 200);
-      });
-    });
-    await page.waitForTimeout(2000);
+    // =====================================================================
+    // 💡 [궁극의 스크롤 & 스캔] 내리면서 실시간으로 캡처본의 ID를 감시합니다!
+    // =====================================================================
+    console.log(`[동작] 화면을 내리면서 댓글 버튼(#Comi${POST_NO})이 뜨는지 실시간 감시합니다...`);
+    let isClicked = false;
 
-    // =====================================================================
-    // 💡 [초강력 수정] 캡처해주신 HTML 구조를 1순위로 타격합니다!
-    // =====================================================================
-    console.log('💡 [동작] 회원님이 캡처해주신 HTML 구조를 바탕으로 댓글 버튼을 찌릅니다...');
-    const isClicked = await page.evaluate(() => {
-      // 1. [1순위] 캡처본에 있는 'btn_comment' 클래스나 'Comi...' 아이디를 직접 타격!
-      const directBtn = document.querySelector('a.btn_comment') || 
-                        document.querySelector('.area_comment a[role="button"]') ||
-                        document.querySelector('a[id^="Comi"]');
+    // 최대 20번(약 10초) 동안 스크롤을 내리며 버튼을 찾습니다.
+    for (let i = 0; i < 20; i++) {
+      // 1. 사람처럼 부드럽게 한 칸(600px) 내리기
+      await page.evaluate(() => window.scrollBy(0, 600));
+      // 2. 네이버가 렌더링할 시간 0.5초 주기
+      await page.waitForTimeout(500); 
+
+      // 3. 버튼이 화면에 생겼는지 확인! (캡처본 기반 완벽한 셀렉터)
+      const btnLocator = page.locator(`#Comi${POST_NO}, a.btn_comment, .area_comment a[role="button"]`).first();
       
-      if (directBtn) {
-        directBtn.click();
-        return true;
+      if (await btnLocator.count() > 0) {
+        console.log(`✅ [발견] ${i+1}번째 스크롤에서 댓글 버튼을 낚아챘습니다! 클릭!`);
+        // 가려져 있든 말든 무조건 강제 클릭
+        await btnLocator.click({ force: true });
+        isClicked = true;
+        await page.waitForTimeout(3000); // 댓글창 애니메이션 대기
+        break; // 찾았으니 스크롤 중단
       }
-
-      // 2. [2순위] 혹시나 모바일 플로팅 바가 뜰 경우를 대비한 백업
-      const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
-      if (floatingBar) {
-        const btns = floatingBar.querySelectorAll('a, button');
-        for (const btn of btns) {
-          const className = (btn.className || '').toLowerCase();
-          const href = (btn.href || '').toLowerCase();
-          if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
-            btn.click();
-            return true;
-          }
-        }
-        if (btns.length >= 2) {
-          btns[1].click();
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (!isClicked) {
-      console.log('⚠️ DOM에서조차 댓글 버튼을 찾을 수 없습니다. 댓글이 막혀있을 수 있습니다.');
-      return; 
     }
 
-    console.log('✅ 댓글 버튼 강제 클릭 성공! 댓글창이 열리기를 기다립니다...');
+    if (!isClicked) {
+      console.log('⚠️ 끝까지 스크롤하며 찾았지만 댓글 버튼이 나타나지 않았습니다. (막혀있음)');
+      return; 
+    }
     // =====================================================================
     
     try {
@@ -320,6 +293,7 @@ async function runAgent() {
             
             let postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
             let isAlreadyInPost = await postBodyLocator.count() > 0;
+            let currentNeighborLogNo = null; // 이웃 글 번호 저장용
 
             if (!isAlreadyInPost) {
               const latestPostUrl = await neighborPage.evaluate((id) => {
@@ -347,12 +321,13 @@ async function runAgent() {
                     }
                   }
                 }
-                return bestHref;
+                return { bestHref, maxLogNo };
               }, neighborId);
 
-              if (latestPostUrl) {
+              if (latestPostUrl && latestPostUrl.bestHref) {
                 console.log(`🔗 [답방 진입] 숫자가 가장 큰(진짜 최신) 게시글을 발견했습니다! 들어갑니다.`);
-                const fullUrl = latestPostUrl.startsWith('http') ? latestPostUrl : `https://m.blog.naver.com${latestPostUrl}`;
+                const fullUrl = latestPostUrl.bestHref.startsWith('http') ? latestPostUrl.bestHref : `https://m.blog.naver.com${latestPostUrl.bestHref}`;
+                currentNeighborLogNo = latestPostUrl.maxLogNo;
                 
                 await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
                 await neighborPage.waitForTimeout(3000);
@@ -372,11 +347,7 @@ async function runAgent() {
               const neighborComment = await generateNeighborComment(postText);
               console.log(`💬 [이웃 블로그 AI 댓글] ${neighborComment}`);
 
-              await neighborPage.evaluate(() => window.scrollBy(0, 2000));
-              await neighborPage.waitForTimeout(1500);
-              
-              let skipBecauseAlreadyLiked = false;
-
+              // 공감 클릭 로직 생략 없이 그대로 둡니다
               try {
                 const likeBtn = neighborPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn').first();
                 if (await likeBtn.count() > 0) {
@@ -386,69 +357,58 @@ async function runAgent() {
                     el.querySelector('.u_likeit_icon.on') !== null
                   );
 
-                  if (isLiked) {
-                    console.log(`🚫 [공감 체크] 이미 공감 상태입니다. 도망칩니다.`);
-                    skipBecauseAlreadyLiked = true;
-                  } else {
+                  if (!isLiked) {
                     await likeBtn.click({ force: true });
                     console.log(`❤️ [공감 완료] 하트를 눌렀습니다.`);
                     await neighborPage.waitForTimeout(1000);
+                  } else {
+                    console.log(`🚫 [공감 패스] 이미 공감 상태입니다.`);
                   }
                 }
               } catch (e) { console.log('⚠️ 공감 버튼 처리 중 오류'); }
 
-              if (skipBecauseAlreadyLiked) {
-                await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
-              } else {
-                // 이웃 블로그 방문 시에도 동일한 캡처본 로직을 적용합니다!
-                const neighborClicked = await neighborPage.evaluate(() => {
-                  const directBtn = document.querySelector('a.btn_comment') || 
-                                    document.querySelector('.area_comment a[role="button"]') ||
-                                    document.querySelector('a[id^="Comi"]');
-                  if (directBtn) {
-                    directBtn.click();
-                    return true;
-                  }
-                  
-                  const floatingBar = document.querySelector('#floating_bottom') || document.querySelector('div[class*="floating"]');
-                  if (floatingBar) {
-                    const btns = floatingBar.querySelectorAll('a, button');
-                    for (const btn of btns) {
-                      const className = (btn.className || '').toLowerCase();
-                      const href = (btn.href || '').toLowerCase();
-                      if (className.includes('comment') || className.includes('reply') || href.includes('comment')) {
-                        btn.click();
-                        return true;
-                      }
-                    }
-                    if (btns.length >= 2) { btns[1].click(); return true; }
-                  }
-                  return false;
-                });
-                
-                if (neighborClicked) {
-                  await neighborPage.waitForTimeout(3000); 
-                  
-                  const myCommentCount = await neighborPage.$$eval('.u_cbox_comment', elements => {
-                    return elements.filter(el => {
-                      const info = el.getAttribute('data-info');
-                      return info && info.includes('mine:true');
-                    }).length;
-                  });
+              // 💡 이웃 블로그에도 동일하게 실시간 스캔 기법 적용!
+              console.log(`[동작] 이웃 블로그 화면을 내리면서 댓글 버튼을 찾습니다...`);
+              let neighborClicked = false;
+              
+              const neighborBtnSelectors = [
+                currentNeighborLogNo ? `#Comi${currentNeighborLogNo}` : null,
+                'a.btn_comment',
+                '.area_comment a[role="button"]'
+              ].filter(Boolean).join(', ');
 
-                  if (myCommentCount > 0) {
-                    console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
-                    await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
-                  } else {
-                    await neighborPage.fill('.u_cbox_text', neighborComment);
-                    await neighborPage.click('.u_cbox_btn_upload');
-                    console.log(`✅ [답방 완료] 이웃 블로그에 공감 댓글을 남겼습니다.`);
-                    
-                    await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
-                  }
-                } else {
-                  console.log(`⚠️ [답방 패스] 이웃 블로그의 댓글창이 닫혀있습니다.`);
+              for (let i = 0; i < 20; i++) {
+                await neighborPage.evaluate(() => window.scrollBy(0, 600));
+                await neighborPage.waitForTimeout(500);
+                
+                const nbBtnLocator = neighborPage.locator(neighborBtnSelectors).first();
+                if (await nbBtnLocator.count() > 0) {
+                  await nbBtnLocator.click({ force: true });
+                  neighborClicked = true;
+                  await neighborPage.waitForTimeout(3000);
+                  break;
                 }
+              }
+
+              if (neighborClicked) {
+                const myCommentCount = await neighborPage.$$eval('.u_cbox_comment', elements => {
+                  return elements.filter(el => {
+                    const info = el.getAttribute('data-info');
+                    return info && info.includes('mine:true');
+                  }).length;
+                });
+
+                if (myCommentCount > 0) {
+                  console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
+                  await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
+                } else {
+                  await neighborPage.fill('.u_cbox_text', neighborComment);
+                  await neighborPage.click('.u_cbox_btn_upload');
+                  console.log(`✅ [답방 완료] 이웃 블로그에 공감 댓글을 남겼습니다.`);
+                  await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
+                }
+              } else {
+                console.log(`⚠️ [답방 패스] 이웃 블로그의 댓글창을 찾을 수 없습니다.`);
               }
             } else {
               console.log(`⚠️ [답방 패스] 사진만 있거나 텍스트를 읽을 수 없는 글입니다.`);
@@ -456,7 +416,6 @@ async function runAgent() {
             
             await neighborPage.close();
             console.log(`[답방 복귀] 내 블로그로 무사히 돌아왔습니다.`);
-            
             console.log('봇 차단을 피하기 위해 10초 이상 휴식합니다... ☕');
             await page.waitForTimeout(10000 + Math.random() * 5000);
           }
