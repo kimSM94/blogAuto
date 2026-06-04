@@ -148,9 +148,9 @@ async function runAgent() {
     ].join(', ');
 
     // 💡 [수정] Playwright의 진짜 마우스 휠 이벤트를 발생시킵니다.
-    for (let i = 0; i < 20; i++) {
-      await page.mouse.wheel(0, 800); 
-      await page.waitForTimeout(600); 
+for (let i = 0; i < 20; i++) {
+      await page.evaluate(() => window.scrollBy(0, 800)); // 👈 이 부분 교체!
+      await page.waitForTimeout(600);
 
       const btnLocator = page.locator(myBtnSelectors).first();
       
@@ -383,7 +383,7 @@ async function runAgent() {
               ].filter(Boolean).join(', ');
 
               for (let i = 0; i < 20; i++) {
-                await neighborPage.mouse.wheel(0, 800);
+                await neighborPage.evaluate(() => window.scrollBy(0, 800)); // 👈 교체!
                 await neighborPage.waitForTimeout(600);
                 
                 const nbBtnLocator = neighborPage.locator(neighborBtnSelectors).first();
