@@ -87,9 +87,7 @@ async function runAgent() {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   
-  // =====================================================================
-  // 💡 [핵심 수정] 깃허브 서버를 '완벽한 아이폰'으로 세뇌시킵니다.
-  // =====================================================================
+  // 💡 깃허브 서버를 '완벽한 아이폰'으로 세뇌시킵니다.
   const context = await browser.newContext({ 
     storageState: 'state.json',
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
@@ -134,35 +132,57 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
-    // =====================================================================
-    // 💡 다시 본문 URL로 돌아와서 확실하게 클릭하기
-    // =====================================================================
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
 
+    // =====================================================================
+    // 💡 [핵심 수정] 숨겨진 플로팅 바를 꺼내는 스마트 스크롤 로직!
+    // =====================================================================
     console.log('[동작] 아이폰 화면에서 밑으로 스크롤을 내립니다...');
     await page.evaluate(async () => {
       await new Promise((resolve) => {
-        let totalHeight = 0;
+        let lastScrollY = window.scrollY;
+        let unchangedCount = 0;
+        
         const timer = setInterval(() => {
+          // 아래로 500픽셀씩 내리기
           window.scrollBy(0, 500);
-          totalHeight += 500;
-          if (totalHeight > 6000) { clearInterval(timer); resolve(); }
+          
+          if (window.scrollY === lastScrollY) {
+            unchangedCount++;
+          } else {
+            unchangedCount = 0;
+            lastScrollY = window.scrollY;
+          }
+
+          // 화면 바닥에 닿았거나(2번 연속 스크롤 안 됨), 엄청 많이 내렸으면
+          if (unchangedCount >= 2 || window.scrollY > 8000) {
+            clearInterval(timer);
+            // 💡 [핵심] 숨겨진 하단 플로팅 바를 꺼내기 위해 위로 살짝(300px) 올립니다!
+            window.scrollBy(0, -300); 
+            resolve();
+          }
         }, 200);
       });
     });
+    // 스크롤 올린 뒤 플로팅 바가 애니메이션과 함께 나타날 시간을 줍니다.
     await page.waitForTimeout(2000);
 
     try {
-      // 💡 복잡한 클래스명 다 버리고! 오직 "댓글" 이라는 글씨가 있는 링크나 버튼을 냅다 누릅니다.
-      const commentBtn = page.locator('a:has-text("댓글"), button:has-text("댓글")').first();
+      // 💡 로컬에서 작동했던 원래 클래스명 + 보험용 셀렉터 총동원
+      const btnSelector = '.icon__seNf8, .num__OVfhz, a[href*="comment" i], a:has-text("댓글")';
+      
+      // 버튼이 화면에 잡힐 때까지 최대 10초 대기
+      await page.waitForSelector(btnSelector, { state: 'attached', timeout: 10000 });
+      
+      const commentBtn = page.locator(btnSelector).first();
       await commentBtn.click({ force: true });
-      console.log('✅ "댓글" 버튼 글자를 직접 찾아 클릭했습니다!');
+      console.log('✅ 하단 플로팅 바에서 댓글 버튼을 찾아 클릭했습니다!');
       await page.waitForTimeout(3000);
     } catch (e) {
-      console.log('⚠️ 댓글 버튼을 찾지 못했습니다. 댓글이 막혀있을 수 있습니다.');
+      console.log('⚠️ 댓글 버튼을 찾지 못했습니다. 에러:', e.message);
       return;
     }
     // =====================================================================
@@ -279,7 +299,6 @@ async function runAgent() {
           } else {
             console.log(`🚀 [답방 출발] 이웃(${neighborId})의 블로그 홈으로 이동합니다...`);
             
-            // 이웃 페이지를 열 때도 동일하게 아이폰 환경을 상속받습니다.
             const neighborPage = await context.newPage();
             neighborPage.setDefaultTimeout(60000);
             
@@ -368,8 +387,7 @@ async function runAgent() {
               if (skipBecauseAlreadyLiked) {
                 await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
               } else {
-                // 이웃 블로그에서도 동일하게 텍스트 기반 클릭을 적용합니다.
-                const neighborCommentBtn = neighborPage.locator('a:has-text("댓글"), button:has-text("댓글")').first();
+                const neighborCommentBtn = neighborPage.locator('.icon__seNf8, .num__OVfhz, a[href*="comment" i]').first();
                 
                 if (await neighborCommentBtn.count() > 0) {
                   await neighborCommentBtn.click({ force: true });
