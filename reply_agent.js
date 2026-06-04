@@ -16,7 +16,7 @@ async function getLastProcessedCommentNo() {
     const { data } = await supabase.from('bot_settings').select('last_comment_no').eq('id', 1).single();
     if (data && data.last_comment_no) return parseInt(data.last_comment_no, 10);
   } catch (e) { console.log("DB 기억 불러오기 실패:", e); }
-  return 0; 
+  return 0; // 초기값
 }
 
 async function saveLastProcessedCommentNo(no) {
@@ -25,7 +25,9 @@ async function saveLastProcessedCommentNo(no) {
     console.log(`💾 [Supabase 저장 완료] 다음엔 댓글 ID: ${no} 이후부터 읽습니다.`);
   } catch (e) { console.log("DB 기억 저장 실패:", e); }
 }
+// =====================================================================
 
+// 1. 내 블로그용 AI 두뇌
 async function generateReply(commentText) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -35,14 +37,14 @@ async function generateReply(commentText) {
         content: `당신은 IT 기술과 일상을 공유하는 다정한 네이버 블로거입니다. 
         [제약 조건]
         1. 1~2문장으로 짧고 담백하게 작성할 것.
-        2. 이모지(이모티콘)는 절대 사용하지 말 것.
-        3. 'ㅎㅎ' 나 'ㅋㅋ'를 문장 끝에 한두 번만 사용할 것.
-        4. 편안하고 친근한 구어체를 사용할 것.
-        5. 오직 '답글 텍스트' 하나만 출력할 것.`
+        2. 이모지(이모티콘)는 봇 같은 느낌을 주므로 절대 사용하지 말 것.
+        3. 자연스러운 한국어 웃음 표현인 'ㅎㅎ' 나 'ㅋㅋ'를 문장 끝에 한두 번만 사용할 것.
+        4. 편안하고 친근한 구어체(~해요, ~맞아요 등)를 사용할 것.
+        5. (매우 중요) 부연 설명, 상황에 대한 혼잣말 등을 절대 출력하지 말고, 오직 '답글 텍스트' 하나만 출력할 것.`
       },
       {
         role: "user",
-        content: `댓글: "${commentText}"`
+        content: `내 포스팅에 방문자가 다음과 같은 댓글을 남겼습니다: "${commentText}"`
       }
     ],
     temperature: 0.7, 
@@ -51,6 +53,7 @@ async function generateReply(commentText) {
   return response.choices[0].message.content.trim();
 }
 
+// 2. 이웃 블로그용 AI 두뇌
 async function generateNeighborComment(postText) {
   const shortText = postText.length > 800 ? postText.substring(0, 800) : postText;
 
@@ -63,11 +66,12 @@ async function generateNeighborComment(postText) {
         [제약 조건]
         1. 본문 내용을 바탕으로 1~2문장의 공감하는 댓글을 담백하게 작성할 것.
         2. 이모지(이모티콘) 절대 금지. 'ㅎㅎ' 나 'ㅋㅋ'를 자연스럽게 섞어 쓸 것.
-        3. 오직 '댓글 본문'만 출력할 것.`
+        3. 블로그 내용과 전혀 상관없는 매크로성 인사(잘보고 갑니다, 서이추 해요 등)는 절대 금지.
+        4. (매우 중요) 부연 설명 없이 오직 '댓글 본문'만 출력할 것.`
       },
       {
         role: "user",
-        content: `이웃 포스팅 본문: \n\n"${shortText}"` 
+        content: `다음은 이웃 블로그의 최신 포스팅 본문입니다. 읽고 공감하는 댓글을 달아주세요: \n\n"${shortText}"` 
       }
     ],
     temperature: 0.7, 
@@ -83,35 +87,35 @@ async function runAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  
-  const context = await browser.newContext({ 
-    storageState: 'state.json',
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-    viewport: { width: 390, height: 844 },
-    hasTouch: true,
-    isMobile: true
-  });
+  const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
+  // 💡 페이지 기본 타임아웃을 60초로 넉넉하게 연장
   page.setDefaultTimeout(60000);
 
   try {
+    // -------------------------------------------------------------
+    // 내 블로그 최신 글 번호 자동 추출 로직
+    // -------------------------------------------------------------
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
     
-    // 💡 [수정] DOM만 껍데기로 로드되지 않게 'load' 이벤트를 끝까지 기다립니다.
-    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'load' });
+    // 💡 networkidle -> domcontentloaded 로 변경 (무한 대기 방지)
+    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
     const latestLogNo = await page.evaluate((id) => {
       const links = Array.from(document.querySelectorAll('a'));
       let maxLogNo = 0;
+      
       for (const a of links) {
         const href = a.getAttribute('href');
         if (href && href.toLowerCase().includes(id.toLowerCase()) && /\d{10,}/.test(href) && !href.includes('comment') && !href.includes('profile')) {
           const numMatch = href.match(/(\d{10,})/);
           if (numMatch) {
             const num = parseInt(numMatch[1], 10);
-            if (num > maxLogNo) { maxLogNo = num; }
+            if (num > maxLogNo) {
+              maxLogNo = num;
+            }
           }
         }
       }
@@ -126,75 +130,38 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
+    // 찾은 최신 글 번호로 이동
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
     
-    // 💡 [수정] 자바스크립트가 완전히 준비될 때까지 기다립니다.
-    await page.goto(targetUrl, { waitUntil: 'load' });
-    
-    // 네트워크가 좀 잠잠해질 때까지 3초간 기회를 줍니다 (에러 나도 무시)
-    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
-    console.log(`[동작] 물리적인 마우스 휠을 굴려 화면을 내립니다...`);
-    let isClicked = false;
-
-    const myBtnSelectors = [
-      'span:has-text("이 글에 댓글 단 블로거 열고 닫기")', 
-      'span:has-text("댓글 단 블로거")',
-      `#Comi${POST_NO}`, 
-      'a.btn_comment', 
-      '.area_comment a[role="button"]'
-    ].join(', ');
-
-    // 💡 [수정] Playwright의 진짜 마우스 휠 이벤트를 발생시킵니다.
-for (let i = 0; i < 20; i++) {
-      await page.evaluate(() => window.scrollBy(0, 800)); // 👈 이 부분 교체!
-      await page.waitForTimeout(600);
-
-      const btnLocator = page.locator(myBtnSelectors).first();
-      
-      if (await btnLocator.count() > 0) {
-        console.log(`✅ [발견] ${i+1}번째 휠 스크롤에서 댓글 버튼을 찾아 클릭합니다!`);
-        await btnLocator.click({ force: true });
-        isClicked = true;
-        await page.waitForTimeout(3000); 
-        break; 
-      }
-    }
-
-    // =====================================================================
-    // 💡 [디버깅의 핵심] 실패 시 봇의 눈을 강제로 열어서 보여줍니다!
-    // =====================================================================
-    if (!isClicked) {
-      console.log('⚠️ [오류] 끝까지 스크롤했지만 댓글 버튼이 없습니다.');
-      console.log('📸 봇이 현재 보고 있는 화면의 텍스트를 출력합니다. (단서 포착용)');
-      console.log('--------------------------------------------------');
-      try {
-        const screenText = await page.innerText('body');
-        // 너무 길면 안 되니 앞부분과 뒷부분 일부만 출력합니다.
-        console.log(screenText.substring(0, 800));
-        console.log('\n... (중략) ...\n');
-        console.log(screenText.substring(screenText.length - 800));
-      } catch(err) {
-        console.log('텍스트를 읽어오는 데 실패했습니다.', err.message);
-      }
-      console.log('--------------------------------------------------');
-      console.log('💡 위 텍스트에 "비정상적인 접근", "로그인", "보안문자"가 있다면 봇이 차단된 것입니다.');
-      return; 
-    }
-    // =====================================================================
-    
+    console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
+      // 💡 [안전망 1] 800px 대신 넉넉하게 바닥 부근까지 스크롤합니다.
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 500));
+      await page.waitForTimeout(1500); 
+      
+      // 💡 [안전망 1] force: true를 넣어 가려져 있어도 강제로 누르게 합니다.
+      await page.locator('.icon__seNf8, .num__OVfhz').first().click({ force: true, timeout: 10000 });
+      console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
+      await page.waitForTimeout(2500); 
     } catch (e) {
-      console.log('⚠️ 아직 새 댓글이 없거나 로딩되지 않았습니다. (스킵)');
-      return; 
+      console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다. (댓글이 없거나 막힘)');
+    }
+
+    // 💡 [안전망 2] 여기서 무작정 기다리면 60초 뒤에 에러가 납니다! try-catch로 감싸줍니다.
+    try {
+      await page.waitForSelector('.u_cbox_comment', { timeout: 10000 });
+    } catch (e) {
+      console.log('⏩ 달린 댓글이 없거나 버튼이 열리지 않았습니다. 내 블로그 답글 달기를 스킵합니다.');
+      // 여기서 return하지 않고 이웃 순회를 돌기 위해 빈 배열로 처리하고 아래 로직을 뛰어넘습니다.
     }
     
+    // 댓글이 화면에 있으면 긁어오고, 없으면 알아서 빈 배열([])이 됩니다.
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
-    );
+    ).catch(() => []); // 에러 나면 빈 배열 반환
 
     console.log(`총 ${rawDataInfos.length}개의 댓글 데이터를 분석합니다...`);
 
@@ -217,11 +184,16 @@ for (let i = 0; i < 20; i++) {
       if (isMine && replyLevel > 1 && parentNo) {
         repliedParentIds.add(parentNo);
       }
+
       parsedComments.push({ commentNo, parentNo, replyLevel, isMine, isDeleted });
     }
 
+    // =====================================================================
+    // DB에서 기억 꺼내오기
+    // =====================================================================
     const lastProcessedNo = await getLastProcessedCommentNo();
     let currentSessionMaxNo = lastProcessedNo;
+    // =====================================================================
 
     let index = 1;
     for (const comment of parsedComments) {
@@ -235,12 +207,14 @@ for (let i = 0; i < 20; i++) {
         continue;
       }
 
+      // 💡 초고속 건너뛰기
       const currentNoInt = parseInt(commentNo, 10);
       if (currentNoInt <= lastProcessedNo) {
         console.log(`⏩ [스킵] 이미 예전에 확인했던 옛날 댓글입니다. DB 조회 없이 넘어갑니다.`);
         continue;
       }
 
+      // 새로 발견한 가장 큰 숫자를 기록
       if (currentNoInt > currentSessionMaxNo) {
         currentSessionMaxNo = currentNoInt;
       }
@@ -263,7 +237,7 @@ for (let i = 0; i < 20; i++) {
         const aiReplyText = await generateReply(commentText);
         console.log(`💬 [내 블로그 AI 답글] ${aiReplyText}`);
 
-        await commentLocator.locator('.u_cbox_btn_reply').first().click();
+        await commentLocator.locator('.u_cbox_btn_reply').first().click({ force: true });
         await page.waitForTimeout(1000); 
         await page.fill('.u_cbox_text', aiReplyText);
         await page.click('.u_cbox_btn_upload');
@@ -286,7 +260,9 @@ for (let i = 0; i < 20; i++) {
             neighborId = urlObj.searchParams.get('blogId');
             if (!neighborId) {
               const pathParts = urlObj.pathname.split('/').filter(p => p);
-              if (pathParts.length > 0 && !pathParts[0].includes('PostList')) { neighborId = pathParts[0]; }
+              if (pathParts.length > 0 && !pathParts[0].includes('PostList')) {
+                neighborId = pathParts[0];
+              }
             }
           } catch (e) {}
         }
@@ -302,43 +278,47 @@ for (let i = 0; i < 20; i++) {
             const neighborPage = await context.newPage();
             neighborPage.setDefaultTimeout(60000);
             
-            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'load' });
+            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'domcontentloaded' });
             await neighborPage.waitForTimeout(3000); 
             
             let postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
             let isAlreadyInPost = await postBodyLocator.count() > 0;
-            let currentNeighborLogNo = null; 
 
             if (!isAlreadyInPost) {
               const latestPostUrl = await neighborPage.evaluate((id) => {
                 const links = Array.from(document.querySelectorAll('a'));
                 const targetId = id.toLowerCase();
-                let maxLogNo = 0; let bestHref = null;
+                let maxLogNo = 0;
+                let bestHref = null;
+                
                 for (const a of links) {
                   const originalHref = a.getAttribute('href');
                   if (!originalHref) continue;
+                  
                   const href = originalHref.toLowerCase();
                   const hasId = href.includes(`/${targetId}/`) || href.includes(`blogid=${targetId}`);
                   const isNotSystem = !href.includes('comment') && !href.includes('profile') && !href.includes('category') && !href.includes('guestbook');
+                  
                   if (hasId && isNotSystem) {
                     const numberMatch = href.match(/(\d{10,})/); 
                     if (numberMatch) {
                       const currentLogNo = parseInt(numberMatch[1], 10);
-                      if (currentLogNo > maxLogNo) { maxLogNo = currentLogNo; bestHref = originalHref; }
+                      if (currentLogNo > maxLogNo) {
+                        maxLogNo = currentLogNo;
+                        bestHref = originalHref;
+                      }
                     }
                   }
                 }
-                return { bestHref, maxLogNo };
+                return bestHref;
               }, neighborId);
 
-              if (latestPostUrl && latestPostUrl.bestHref) {
+              if (latestPostUrl) {
                 console.log(`🔗 [답방 진입] 숫자가 가장 큰(진짜 최신) 게시글을 발견했습니다! 들어갑니다.`);
-                const fullUrl = latestPostUrl.bestHref.startsWith('http') ? latestPostUrl.bestHref : `https://m.blog.naver.com${latestPostUrl.bestHref}`;
-                currentNeighborLogNo = latestPostUrl.maxLogNo;
+                const fullUrl = latestPostUrl.startsWith('http') ? latestPostUrl : `https://m.blog.naver.com${latestPostUrl}`;
                 
-                await neighborPage.goto(fullUrl, { waitUntil: 'load' });
-                await neighborPage.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
-                await neighborPage.waitForTimeout(2000);
+                await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+                await neighborPage.waitForTimeout(3000);
                 
                 postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
               } else {
@@ -355,66 +335,60 @@ for (let i = 0; i < 20; i++) {
               const neighborComment = await generateNeighborComment(postText);
               console.log(`💬 [이웃 블로그 AI 댓글] ${neighborComment}`);
 
+              await neighborPage.evaluate(() => window.scrollBy(0, 2000));
+              await neighborPage.waitForTimeout(1500);
+              
+              let skipBecauseAlreadyLiked = false;
+
               try {
                 const likeBtn = neighborPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn').first();
                 if (await likeBtn.count() > 0) {
                   const isLiked = await likeBtn.evaluate(el => 
-                    el.getAttribute('aria-pressed') === 'true' || el.classList.contains('on') || el.querySelector('.u_likeit_icon.on') !== null
+                    el.getAttribute('aria-pressed') === 'true' || 
+                    el.classList.contains('on') || 
+                    el.querySelector('.u_likeit_icon.on') !== null
                   );
-                  if (!isLiked) {
+
+                  if (isLiked) {
+                    console.log(`🚫 [공감 체크] 이미 공감 상태입니다. 도망칩니다.`);
+                    skipBecauseAlreadyLiked = true;
+                  } else {
                     await likeBtn.click({ force: true });
                     console.log(`❤️ [공감 완료] 하트를 눌렀습니다.`);
                     await neighborPage.waitForTimeout(1000);
-                  } else {
-                    console.log(`🚫 [공감 패스] 이미 공감 상태입니다.`);
                   }
                 }
               } catch (e) { console.log('⚠️ 공감 버튼 처리 중 오류'); }
 
-              console.log(`[동작] 이웃 블로그 화면을 내리면서 댓글 버튼을 찾습니다...`);
-              let neighborClicked = false;
-              
-              const neighborBtnSelectors = [
-                'span:has-text("이 글에 댓글 단 블로거 열고 닫기")',
-                'span:has-text("댓글 단 블로거")',
-                currentNeighborLogNo ? `#Comi${currentNeighborLogNo}` : null,
-                'a.btn_comment',
-                '.area_comment a[role="button"]'
-              ].filter(Boolean).join(', ');
-
-              for (let i = 0; i < 20; i++) {
-                await neighborPage.evaluate(() => window.scrollBy(0, 800)); // 👈 교체!
-                await neighborPage.waitForTimeout(600);
-                
-                const nbBtnLocator = neighborPage.locator(neighborBtnSelectors).first();
-                if (await nbBtnLocator.count() > 0) {
-                  console.log(`✅ [발견] 이웃 블로그 댓글 버튼을 낚아챘습니다!`);
-                  await nbBtnLocator.click({ force: true });
-                  neighborClicked = true;
-                  await neighborPage.waitForTimeout(3000);
-                  break;
-                }
-              }
-
-              if (neighborClicked) {
-                const myCommentCount = await neighborPage.$$eval('.u_cbox_comment', elements => {
-                  return elements.filter(el => {
-                    const info = el.getAttribute('data-info');
-                    return info && info.includes('mine:true');
-                  }).length;
-                });
-
-                if (myCommentCount > 0) {
-                  console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
-                  await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
-                } else {
-                  await neighborPage.fill('.u_cbox_text', neighborComment);
-                  await neighborPage.click('.u_cbox_btn_upload');
-                  console.log(`✅ [답방 완료] 이웃 블로그에 공감 댓글을 남겼습니다.`);
-                  await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
-                }
+              if (skipBecauseAlreadyLiked) {
+                await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
               } else {
-                console.log(`⚠️ [답방 패스] 이웃 블로그의 댓글창을 찾을 수 없습니다.`);
+                const neighborCommentBtn = neighborPage.locator('.icon__seNf8, .num__OVfhz').first();
+                
+                if (await neighborCommentBtn.count() > 0) {
+                  await neighborCommentBtn.click({ force: true });
+                  await neighborPage.waitForTimeout(3000); 
+                  
+                  const myCommentCount = await neighborPage.$$eval('.u_cbox_comment', elements => {
+                    return elements.filter(el => {
+                      const info = el.getAttribute('data-info');
+                      return info && info.includes('mine:true');
+                    }).length;
+                  }).catch(() => []); // 에러 방어
+
+                  if (myCommentCount > 0) {
+                    console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
+                    await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
+                  } else {
+                    await neighborPage.fill('.u_cbox_text', neighborComment);
+                    await neighborPage.click('.u_cbox_btn_upload');
+                    console.log(`✅ [답방 완료] 이웃 블로그에 공감 댓글을 남겼습니다.`);
+                    
+                    await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
+                  }
+                } else {
+                  console.log(`⚠️ [답방 패스] 이웃 블로그의 댓글창이 닫혀있습니다.`);
+                }
               }
             } else {
               console.log(`⚠️ [답방 패스] 사진만 있거나 텍스트를 읽을 수 없는 글입니다.`);
@@ -422,6 +396,7 @@ for (let i = 0; i < 20; i++) {
             
             await neighborPage.close();
             console.log(`[답방 복귀] 내 블로그로 무사히 돌아왔습니다.`);
+            
             console.log('봇 차단을 피하기 위해 10초 이상 휴식합니다... ☕');
             await page.waitForTimeout(10000 + Math.random() * 5000);
           }
@@ -433,6 +408,9 @@ for (let i = 0; i < 20; i++) {
       }
     }
 
+    // =====================================================================
+    // 오늘 작업 끝! DB에 가장 큰 번호 덮어쓰기
+    // =====================================================================
     if (currentSessionMaxNo > lastProcessedNo) {
       await saveLastProcessedCommentNo(currentSessionMaxNo);
     }
