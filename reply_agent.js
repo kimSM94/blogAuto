@@ -26,7 +26,6 @@ async function saveLastProcessedCommentNo(no) {
   } catch (e) { console.log("DB 기억 저장 실패:", e); }
 }
 
-// 1. 내 블로그용 AI 두뇌
 async function generateReply(commentText) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -36,14 +35,14 @@ async function generateReply(commentText) {
         content: `당신은 IT 기술과 일상을 공유하는 다정한 네이버 블로거입니다. 
         [제약 조건]
         1. 1~2문장으로 짧고 담백하게 작성할 것.
-        2. 이모지(이모티콘)는 봇 같은 느낌을 주므로 절대 사용하지 말 것.
-        3. 자연스러운 한국어 웃음 표현인 'ㅎㅎ' 나 'ㅋㅋ'를 문장 끝에 한두 번만 사용할 것.
-        4. 편안하고 친근한 구어체(~해요, ~맞아요 등)를 사용할 것.
-        5. (매우 중요) 부연 설명, 상황에 대한 혼잣말 등을 절대 출력하지 말고, 오직 '답글 텍스트' 하나만 출력할 것.`
+        2. 이모지(이모티콘)는 절대 사용하지 말 것.
+        3. 'ㅎㅎ' 나 'ㅋㅋ'를 문장 끝에 한두 번만 사용할 것.
+        4. 편안하고 친근한 구어체를 사용할 것.
+        5. 오직 '답글 텍스트' 하나만 출력할 것.`
       },
       {
         role: "user",
-        content: `내 포스팅에 방문자가 다음과 같은 댓글을 남겼습니다: "${commentText}"`
+        content: `댓글: "${commentText}"`
       }
     ],
     temperature: 0.7, 
@@ -52,7 +51,6 @@ async function generateReply(commentText) {
   return response.choices[0].message.content.trim();
 }
 
-// 2. 이웃 블로그용 AI 두뇌
 async function generateNeighborComment(postText) {
   const shortText = postText.length > 800 ? postText.substring(0, 800) : postText;
 
@@ -65,12 +63,11 @@ async function generateNeighborComment(postText) {
         [제약 조건]
         1. 본문 내용을 바탕으로 1~2문장의 공감하는 댓글을 담백하게 작성할 것.
         2. 이모지(이모티콘) 절대 금지. 'ㅎㅎ' 나 'ㅋㅋ'를 자연스럽게 섞어 쓸 것.
-        3. 블로그 내용과 전혀 상관없는 매크로성 인사(잘보고 갑니다, 서이추 해요 등)는 절대 금지.
-        4. (매우 중요) 부연 설명 없이 오직 '댓글 본문'만 출력할 것.`
+        3. 오직 '댓글 본문'만 출력할 것.`
       },
       {
         role: "user",
-        content: `다음은 이웃 블로그의 최신 포스팅 본문입니다. 읽고 공감하는 댓글을 달아주세요: \n\n"${shortText}"` 
+        content: `이웃 포스팅 본문: \n\n"${shortText}"` 
       }
     ],
     temperature: 0.7, 
@@ -101,22 +98,20 @@ async function runAgent() {
   try {
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
     
-    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
+    // 💡 [수정] DOM만 껍데기로 로드되지 않게 'load' 이벤트를 끝까지 기다립니다.
+    await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'load' });
     await page.waitForTimeout(2000);
 
     const latestLogNo = await page.evaluate((id) => {
       const links = Array.from(document.querySelectorAll('a'));
       let maxLogNo = 0;
-      
       for (const a of links) {
         const href = a.getAttribute('href');
         if (href && href.toLowerCase().includes(id.toLowerCase()) && /\d{10,}/.test(href) && !href.includes('comment') && !href.includes('profile')) {
           const numMatch = href.match(/(\d{10,})/);
           if (numMatch) {
             const num = parseInt(numMatch[1], 10);
-            if (num > maxLogNo) {
-              maxLogNo = num;
-            }
+            if (num > maxLogNo) { maxLogNo = num; }
           }
         }
       }
@@ -133,31 +128,34 @@ async function runAgent() {
 
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000);
+    
+    // 💡 [수정] 자바스크립트가 완전히 준비될 때까지 기다립니다.
+    await page.goto(targetUrl, { waitUntil: 'load' });
+    
+    // 네트워크가 좀 잠잠해질 때까지 3초간 기회를 줍니다 (에러 나도 무시)
+    await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(2000);
 
-    console.log(`[동작] 화면을 내리면서 숨겨진 댓글 버튼을 감시합니다...`);
+    console.log(`[동작] 물리적인 마우스 휠을 굴려 화면을 내립니다...`);
     let isClicked = false;
 
-    // =====================================================================
-    // 💡 [초강력 무기 추가] 회원님이 직접 찾아낸 blind 텍스트 셀렉터 장착!
-    // =====================================================================
     const myBtnSelectors = [
-      'span:has-text("이 글에 댓글 단 블로거 열고 닫기")', // 💡 회원님이 찾은 특급 단서!
+      'span:has-text("이 글에 댓글 단 블로거 열고 닫기")', 
       'span:has-text("댓글 단 블로거")',
       `#Comi${POST_NO}`, 
       'a.btn_comment', 
       '.area_comment a[role="button"]'
     ].join(', ');
 
+    // 💡 [수정] Playwright의 진짜 마우스 휠 이벤트를 발생시킵니다.
     for (let i = 0; i < 20; i++) {
-      await page.evaluate(() => window.scrollBy(0, 600));
-      await page.waitForTimeout(500); 
+      await page.mouse.wheel(0, 800); 
+      await page.waitForTimeout(600); 
 
       const btnLocator = page.locator(myBtnSelectors).first();
       
       if (await btnLocator.count() > 0) {
-        console.log(`✅ [발견] ${i+1}번째 스크롤에서 댓글 버튼을 낚아챘습니다! 클릭!`);
+        console.log(`✅ [발견] ${i+1}번째 휠 스크롤에서 댓글 버튼을 찾아 클릭합니다!`);
         await btnLocator.click({ force: true });
         isClicked = true;
         await page.waitForTimeout(3000); 
@@ -165,8 +163,24 @@ async function runAgent() {
       }
     }
 
+    // =====================================================================
+    // 💡 [디버깅의 핵심] 실패 시 봇의 눈을 강제로 열어서 보여줍니다!
+    // =====================================================================
     if (!isClicked) {
-      console.log('⚠️ 끝까지 스크롤하며 찾았지만 댓글 버튼이 나타나지 않았습니다. (막혀있음)');
+      console.log('⚠️ [오류] 끝까지 스크롤했지만 댓글 버튼이 없습니다.');
+      console.log('📸 봇이 현재 보고 있는 화면의 텍스트를 출력합니다. (단서 포착용)');
+      console.log('--------------------------------------------------');
+      try {
+        const screenText = await page.innerText('body');
+        // 너무 길면 안 되니 앞부분과 뒷부분 일부만 출력합니다.
+        console.log(screenText.substring(0, 800));
+        console.log('\n... (중략) ...\n');
+        console.log(screenText.substring(screenText.length - 800));
+      } catch(err) {
+        console.log('텍스트를 읽어오는 데 실패했습니다.', err.message);
+      }
+      console.log('--------------------------------------------------');
+      console.log('💡 위 텍스트에 "비정상적인 접근", "로그인", "보안문자"가 있다면 봇이 차단된 것입니다.');
       return; 
     }
     // =====================================================================
@@ -174,7 +188,7 @@ async function runAgent() {
     try {
       await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
     } catch (e) {
-      console.log('⚠️ 아직 새 댓글이 없거나 로딩되지 않았습니다. (답글 달 대상이 없으므로 스킵합니다)');
+      console.log('⚠️ 아직 새 댓글이 없거나 로딩되지 않았습니다. (스킵)');
       return; 
     }
     
@@ -203,7 +217,6 @@ async function runAgent() {
       if (isMine && replyLevel > 1 && parentNo) {
         repliedParentIds.add(parentNo);
       }
-
       parsedComments.push({ commentNo, parentNo, replyLevel, isMine, isDeleted });
     }
 
@@ -273,9 +286,7 @@ async function runAgent() {
             neighborId = urlObj.searchParams.get('blogId');
             if (!neighborId) {
               const pathParts = urlObj.pathname.split('/').filter(p => p);
-              if (pathParts.length > 0 && !pathParts[0].includes('PostList')) {
-                neighborId = pathParts[0];
-              }
+              if (pathParts.length > 0 && !pathParts[0].includes('PostList')) { neighborId = pathParts[0]; }
             }
           } catch (e) {}
         }
@@ -291,36 +302,29 @@ async function runAgent() {
             const neighborPage = await context.newPage();
             neighborPage.setDefaultTimeout(60000);
             
-            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'domcontentloaded' });
+            await neighborPage.goto(`https://m.blog.naver.com/${neighborId}`, { waitUntil: 'load' });
             await neighborPage.waitForTimeout(3000); 
             
             let postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
             let isAlreadyInPost = await postBodyLocator.count() > 0;
-            let currentNeighborLogNo = null;
+            let currentNeighborLogNo = null; 
 
             if (!isAlreadyInPost) {
               const latestPostUrl = await neighborPage.evaluate((id) => {
                 const links = Array.from(document.querySelectorAll('a'));
                 const targetId = id.toLowerCase();
-                let maxLogNo = 0;
-                let bestHref = null;
-                
+                let maxLogNo = 0; let bestHref = null;
                 for (const a of links) {
                   const originalHref = a.getAttribute('href');
                   if (!originalHref) continue;
-                  
                   const href = originalHref.toLowerCase();
                   const hasId = href.includes(`/${targetId}/`) || href.includes(`blogid=${targetId}`);
                   const isNotSystem = !href.includes('comment') && !href.includes('profile') && !href.includes('category') && !href.includes('guestbook');
-                  
                   if (hasId && isNotSystem) {
                     const numberMatch = href.match(/(\d{10,})/); 
                     if (numberMatch) {
                       const currentLogNo = parseInt(numberMatch[1], 10);
-                      if (currentLogNo > maxLogNo) {
-                        maxLogNo = currentLogNo;
-                        bestHref = originalHref;
-                      }
+                      if (currentLogNo > maxLogNo) { maxLogNo = currentLogNo; bestHref = originalHref; }
                     }
                   }
                 }
@@ -332,8 +336,9 @@ async function runAgent() {
                 const fullUrl = latestPostUrl.bestHref.startsWith('http') ? latestPostUrl.bestHref : `https://m.blog.naver.com${latestPostUrl.bestHref}`;
                 currentNeighborLogNo = latestPostUrl.maxLogNo;
                 
-                await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
-                await neighborPage.waitForTimeout(3000);
+                await neighborPage.goto(fullUrl, { waitUntil: 'load' });
+                await neighborPage.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+                await neighborPage.waitForTimeout(2000);
                 
                 postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
               } else {
@@ -354,11 +359,8 @@ async function runAgent() {
                 const likeBtn = neighborPage.locator('a.u_likeit_list_btn, button.u_likeit_list_btn').first();
                 if (await likeBtn.count() > 0) {
                   const isLiked = await likeBtn.evaluate(el => 
-                    el.getAttribute('aria-pressed') === 'true' || 
-                    el.classList.contains('on') || 
-                    el.querySelector('.u_likeit_icon.on') !== null
+                    el.getAttribute('aria-pressed') === 'true' || el.classList.contains('on') || el.querySelector('.u_likeit_icon.on') !== null
                   );
-
                   if (!isLiked) {
                     await likeBtn.click({ force: true });
                     console.log(`❤️ [공감 완료] 하트를 눌렀습니다.`);
@@ -372,7 +374,6 @@ async function runAgent() {
               console.log(`[동작] 이웃 블로그 화면을 내리면서 댓글 버튼을 찾습니다...`);
               let neighborClicked = false;
               
-              // 💡 이웃 블로그 방문 시에도 동일한 텍스트 타겟 추가!
               const neighborBtnSelectors = [
                 'span:has-text("이 글에 댓글 단 블로거 열고 닫기")',
                 'span:has-text("댓글 단 블로거")',
@@ -382,8 +383,8 @@ async function runAgent() {
               ].filter(Boolean).join(', ');
 
               for (let i = 0; i < 20; i++) {
-                await neighborPage.evaluate(() => window.scrollBy(0, 600));
-                await neighborPage.waitForTimeout(500);
+                await neighborPage.mouse.wheel(0, 800);
+                await neighborPage.waitForTimeout(600);
                 
                 const nbBtnLocator = neighborPage.locator(neighborBtnSelectors).first();
                 if (await nbBtnLocator.count() > 0) {
