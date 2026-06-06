@@ -236,16 +236,28 @@ async function runFeedAgent() {
           } else {
             console.log(`📝 [${blogId}] 위키(기억) 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
             
-            // 💡 [핵심 교체] 기존 AI 댓글 대신 위키 전용 댓글 함수 호출!
+            // 기존 AI 댓글 대신 위키 전용 댓글 함수 호출!
             const { myComment, updatedWiki } = await generateWikiComment(wiki, postText);
             console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
 
-            await postPage.fill('.u_cbox_text', myComment);
+            // 💡 [수정] 댓글 입력 및 등록 로직 안정화
+            const commentInput = postPage.locator('.u_cbox_text').first();
+            await commentInput.scrollIntoViewIfNeeded(); // 화면에 보이도록 스크롤
+            await commentInput.click(); // 텍스트 박스를 확실히 활성화하기 위해 클릭
             await postPage.waitForTimeout(500);
-            await postPage.click('.u_cbox_btn_upload');
+            
+            await commentInput.fill(myComment);
+            await postPage.waitForTimeout(1000); // 텍스트 입력 후 등록 버튼이 활성화될(UI 업데이트) 시간 확보
+
+            const uploadBtn = postPage.locator('.u_cbox_btn_upload').first();
+            
+            // 💡 [핵심] 하단 플로팅 바에 가려져서 'not visible' 처리되는 것을 막기 위해 강제 클릭(force) 사용
+            await uploadBtn.click({ force: true, delay: 150 });
+            
+            await postPage.waitForTimeout(1000); // 등록 처리 대기
             console.log(`✅ [작성 완료] 이웃 새글에 댓글을 남겼습니다.`);
 
-            // 💾 [핵심 추가] 성공적으로 댓글을 달았다면, 이웃 위키(기억) 업데이트 저장!
+            // 성공적으로 댓글을 달았다면, 이웃 위키(기억) 업데이트 저장!
             console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
             await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
           }
