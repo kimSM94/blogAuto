@@ -3,6 +3,7 @@ name: Naver Blog Automation Agent
 on:
   push: 
     branches:
+      - main  # 💡 [수정] 브랜치 이름이 비어있으면 에러가 나므로 추가했습니다. (master라면 master로 변경)
   schedule:
     - cron: '30 3 * * *'  # 매일 UTC 03:30 (한국 점심 - 답글/피드)
     - cron: '0 11 * * *'  # 매일 UTC 11:00 (한국 저녁 - 답글/피드)
@@ -53,8 +54,11 @@ jobs:
       - name: 🌐 Playwright 브라우저 설치
         run: npx playwright install chromium --with-deps
         
+      # 💡 [핵심 수정] 따옴표 충돌 에러를 막기 위해 환경변수(env)를 거쳐서 안전하게 파일을 생성합니다.
       - name: 🔑 안전한 로그인 세션 생성
-        run: echo '${{ secrets.NAVER_STATE_JSON }}' > state.json
+        env:
+          STATE_JSON: ${{ secrets.NAVER_STATE_JSON }}
+        run: echo "$STATE_JSON" > state.json
         
       # =================================================================
       # 🚀 1. 점심/저녁 에이전트 (답글 & 피드 순회)
@@ -117,7 +121,6 @@ jobs:
       - name: 📝 블로그 포스팅 에이전트 실행
         if: github.event_name == 'workflow_dispatch' && inputs.bot_type == 'blog_upload'
         env:
-          # Cloudflare가 넘겨준 파라미터(inputs)를 Node.js 환경변수로 변환하여 꽂아줍니다!
           AI_TITLE: ${{ inputs.param_title }}
           AI_INTRO: ${{ inputs.param_intro }}
           AI_INFO: ${{ inputs.param_info }}
