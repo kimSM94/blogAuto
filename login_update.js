@@ -1,24 +1,22 @@
 const { chromium } = require('playwright');
 
 (async () => {
-  console.log("🔑 네이버 로그인 세션(state.json) 갱신을 시작합니다...");
-  // 새 창을 띄웁니다 (기존 state.json을 무시하고 완전 새 상태로 켬)
+  // headless: false로 설정하여 화면을 띄우고 직접 로그인합니다.
   const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext(); 
+  const context = await browser.newContext();
   const page = await context.newPage();
 
-  // 네이버 로그인 화면으로 바로 이동
   await page.goto('https://nid.naver.com/nidlogin.login');
-  
-  console.log("⏳ 뜬 브라우저 창에서 직접 아이디/비밀번호를 치고 [로그인]을 완료해 주세요!");
-  console.log("⏳ (2단계 인증이나 캡차가 뜰 수 있으니 사람의 손길이 필요합니다. 40초 대기할게요!)");
 
-  // 회원님이 폰으로 인증번호 누르고 로그인할 수 있도록 40초 넉넉하게 대기!
-  await page.waitForTimeout(40000); 
+  console.log("👀 브라우저 창이 열리면 네이버 로그인을 진행해주세요.");
+  console.log("⏳ 로그인이 완료되고 네이버 메인 화면으로 이동하면 자동으로 세션이 저장됩니다...");
 
-  // 로그인 완료 후 따끈따끈한 쿠키를 state.json으로 저장
+  // 네이버 메인 화면(www.naver.com)으로 넘어갈 때까지 무한 대기 (로그인 성공 기준)
+  await page.waitForURL('https://www.naver.com/**', { timeout: 0 }); 
+
+  // 로그인 성공 후 쿠키/세션 상태를 기존 state.json 파일에 덮어쓰기
   await context.storageState({ path: 'state.json' });
-  console.log("✅ 새로운 state.json 파일이 완벽하게 갱신되었습니다!");
+  console.log("✅ state.json 파일이 성공적으로 최신화되었습니다!");
 
   await browser.close();
 })();
