@@ -58,7 +58,7 @@ jobs:
       - name: 🔑 안전한 로그인 세션 생성
         env:
           STATE_JSON: ${{ secrets.NAVER_STATE_JSON }}
-        run: echo "$STATE_JSON" > state.json
+        run: cat <<< "$STATE_JSON" > state.json
         
       # =================================================================
       # 🚀 1. 점심/저녁 에이전트 (답글 & 피드 순회)
