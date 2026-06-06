@@ -380,8 +380,19 @@ async function runAgent() {
                     console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
                     await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
                   } else {
+                    // 1. 입력창을 먼저 한 번 클릭(터치)해서 네이버 JS를 깨웁니다.
+                    await neighborPage.locator('.u_cbox_text').first().click({ force: true });
+                    await neighborPage.waitForTimeout(500);
+
+                    // 2. 텍스트를 채워 넣습니다.
                     await neighborPage.fill('.u_cbox_text', neighborComment);
-                    await neighborPage.click('.u_cbox_btn_upload');
+                    await neighborPage.waitForTimeout(500);
+
+                    // 3. Playwright의 시력 검사를 무시하고, JS로 등록 버튼을 직접 때립니다!
+                    await neighborPage.evaluate(() => {
+                      const uploadBtn = document.querySelector('.u_cbox_btn_upload');
+                      if (uploadBtn) uploadBtn.click();
+                    });
                     console.log(`✅ [답방 완료] 이웃 블로그에 공감 댓글을 남겼습니다.`);
                     
                     await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
