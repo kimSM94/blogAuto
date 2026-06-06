@@ -231,35 +231,39 @@ async function runFeedAgent() {
             });
           });
 
-          if (alreadyCommented) {
+if (alreadyCommented) {
             console.log(`🚫 [중복 방지] 이미 내가 작성한 댓글이 있습니다. 건너뜁니다.`);
           } else {
-            console.log(`📝 [${blogId}] 위키(기억) 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
-            
-            // 기존 AI 댓글 대신 위키 전용 댓글 함수 호출!
-            const { myComment, updatedWiki } = await generateWikiComment(wiki, postText);
-            console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
+            // 🛑 [추가된 방어 로직] 로그인 안내문이 떠 있는지 확인
+            const loginGuide = postPage.locator('.u_cbox_guide').first();
+            const isLoginRequired = await loginGuide.count() > 0 && await loginGuide.innerText().then(t => t.includes('로그인'));
 
-            // 💡 [수정] 댓글 입력 및 등록 로직 안정화
-            const commentInput = postPage.locator('.u_cbox_text').first();
-            await commentInput.scrollIntoViewIfNeeded(); // 화면에 보이도록 스크롤
-            await commentInput.click(); // 텍스트 박스를 확실히 활성화하기 위해 클릭
-            await postPage.waitForTimeout(500);
-            
-            await commentInput.fill(myComment);
-            await postPage.waitForTimeout(1000); // 텍스트 입력 후 등록 버튼이 활성화될(UI 업데이트) 시간 확보
+            if (isLoginRequired) {
+              console.log(`⚠️ [세션 만료] '로그인 해주세요' 안내문이 감지되었습니다. (state.json 갱신 필요) 댓글 작성을 건너뜁니다.`);
+            } else {
+              console.log(`📝 [${blogId}] 위키(기억) 정보를 바탕으로 맞춤형 댓글을 고민 중...`);
+              
+              const { myComment, updatedWiki } = await generateWikiComment(wiki, postText);
+              console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
 
-            const uploadBtn = postPage.locator('.u_cbox_btn_upload').first();
-            
-            // 💡 [핵심] 하단 플로팅 바에 가려져서 'not visible' 처리되는 것을 막기 위해 강제 클릭(force) 사용
-            await uploadBtn.click({ force: true, delay: 150 });
-            
-            await postPage.waitForTimeout(1000); // 등록 처리 대기
-            console.log(`✅ [작성 완료] 이웃 새글에 댓글을 남겼습니다.`);
+              // 댓글 입력 및 등록 로직
+              const commentInput = postPage.locator('.u_cbox_text').first();
+              await commentInput.scrollIntoViewIfNeeded(); 
+              await commentInput.click({ force: true }); // 안내문이 없을 때만 안전하게 클릭
+              await postPage.waitForTimeout(500);
+              
+              await commentInput.fill(myComment);
+              await postPage.waitForTimeout(1000); 
 
-            // 성공적으로 댓글을 달았다면, 이웃 위키(기억) 업데이트 저장!
-            console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
-            await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+              const uploadBtn = postPage.locator('.u_cbox_btn_upload').first();
+              await uploadBtn.click({ force: true, delay: 150 });
+              
+              await postPage.waitForTimeout(1000); 
+              console.log(`✅ [작성 완료] 이웃 새글에 댓글을 남겼습니다.`);
+
+              console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
+              await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+            }
           }
           
           await supabase.from('processed_feed_posts').insert([{ post_id: logNo }]);
