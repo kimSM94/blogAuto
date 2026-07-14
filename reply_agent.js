@@ -240,7 +240,17 @@ async function runAgent() {
         await commentLocator.locator('.u_cbox_btn_reply').first().click({ force: true });
         await page.waitForTimeout(1000); 
         await page.fill('.u_cbox_text', aiReplyText);
-        await page.click('.u_cbox_btn_upload');
+        // 💡 복잡한 ID 찾기 없이, 텍스트 입력창 근처의 첫 번째 등록 버튼을 강제 클릭!
+        const replyUploadBtn = page.locator('.u_cbox_btn_upload').first();
+
+        // 화면에 최대한 보이도록 스크롤
+        await replyUploadBtn.scrollIntoViewIfNeeded(); 
+
+        // 플로팅 바에 가려져 있어도 무시하고 강제로(force) 꾹 누르기
+        await replyUploadBtn.click({ force: true, delay: 150 });
+
+        // 서버에 안전하게 등록될 때까지 대기
+        await page.waitForTimeout(1500);
         
         await supabase.from('processed_comments').insert([{ comment_id: commentNo }]);
         console.log(`✅ [답글 작성 완료]`);
