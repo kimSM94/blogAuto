@@ -247,7 +247,20 @@ if (alreadyCommented) {
               console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
 
               // 댓글 입력 및 등록 로직
-              const commentInput = postPage.locator('.u_cbox_text').first();
+              try {
+                  const commentBox = page.locator('.u_cbox_text').first();
+                  
+                  // 댓글창이 나타날 때까지 최대 5초만 기다립니다.
+                  await commentBox.waitFor({ state: 'visible', timeout: 5000 }); 
+                  await commentBox.scrollIntoViewIfNeeded();
+                  
+                  // ... 이 아래는 원래 있던 댓글 클릭/작성 로직 그대로 두시면 됩니다 ...
+
+              } catch (error) {
+                  console.log("⚠️ 댓글창이 닫혀있거나 구조가 다릅니다. 댓글 작성을 건너뜁니다.");
+                  // 이 글은 패스하고 다음 글로 쿨하게 넘어갑니다!
+                  continue; 
+              }
               await commentInput.scrollIntoViewIfNeeded(); 
               await commentInput.click({ force: true }); // 안내문이 없을 때만 안전하게 클릭
               await postPage.waitForTimeout(500);

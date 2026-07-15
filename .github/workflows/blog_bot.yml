@@ -3,7 +3,7 @@ name: Naver Blog Automation Agent
 on:
   push: 
     branches:
-      - main  # 💡 [수정] 브랜치 이름이 비어있으면 에러가 나므로 추가했습니다. (master라면 master로 변경)
+      - main  # 💡 본인 깃허브 기본 브랜치가 master라면 master로 변경하세요.
   schedule:
     - cron: '30 3 * * *'  # 매일 UTC 03:30 (한국 점심 - 답글/피드)
     - cron: '0 11 * * *'  # 매일 UTC 11:00 (한국 저녁 - 답글/피드)
@@ -16,7 +16,6 @@ on:
         description: '실행할 봇 종류'
         required: true
         default: 'all'
-      # 💡 [추가됨] Cloudflare에서 보내는 치환용 데이터들을 받을 문을 열어줍니다!
       param_title:
         description: '블로그 제목'
         required: false
@@ -43,10 +42,10 @@ jobs:
       - name: 📂 소스 코드 가져오기
         uses: actions/checkout@v3
         
-      - name: ⚙️ Node.js 세팅 (버전 22)
+      - name: ⚙️ Node.js 세팅 (안정적인 LTS 버전 20 사용)
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '20'
           
       - name: 📦 패키지 설치
         run: npm install
@@ -54,11 +53,11 @@ jobs:
       - name: 🌐 Playwright 브라우저 설치
         run: npx playwright install chromium --with-deps
         
-      # 💡 [핵심 수정] 따옴표 충돌 에러를 막기 위해 환경변수(env)를 거쳐서 안전하게 파일을 생성합니다.
       - name: 🔑 안전한 로그인 세션 생성
         env:
           STATE_JSON: ${{ secrets.NAVER_STATE_JSON }}
-        run: cat <<< "$STATE_JSON" > state.json
+        # 💡 [핵심 수정] echo 명령어로 변경하여 특수문자나 줄바꿈이 있는 JSON을 더 안전하게 저장합니다.
+        run: echo "$STATE_JSON" > state.json
         
       # =================================================================
       # 🚀 1. 점심/저녁 에이전트 (답글 & 피드 순회)
@@ -116,7 +115,7 @@ jobs:
           node organize_agent.js
 
       # =================================================================
-      # 📝 [신규] 5. 블로그 자동 포스팅 에이전트 (Cloudflare 연동)
+      # 📝 5. 블로그 자동 포스팅 에이전트 (Cloudflare 연동)
       # =================================================================
       - name: 📝 블로그 포스팅 에이전트 실행
         if: github.event_name == 'workflow_dispatch' && inputs.bot_type == 'blog_upload'
