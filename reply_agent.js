@@ -138,16 +138,20 @@ async function runAgent() {
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      // 1. 화면을 맨 밑으로 끝까지 내려서 네이버가 댓글 버튼을 화면에 그리도록 유도합니다.
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await page.waitForTimeout(2000); 
+      // 💡 [핵심 해결책] 한 번에 내리지 않고, 마우스 휠을 굴리듯 여러 번 나눠서 스크롤! (네이버 로딩 강제 유도)
+      for (let i = 0; i < 5; i++) {
+        await page.mouse.wheel(0, 1500);
+        await page.waitForTimeout(500);
+      }
       
-      // 2. 💡 캡처해주신 구조 완벽 반영! (랜덤 클래스가 바뀌어도, data-click-area 속성으로 무조건 찾아냅니다)
-      const commentBtn = page.locator('button[class^="comment_btn__"], button[data-click-area="pst.re"], a.btn_comment').first();
+      // 더 광범위하게 댓글 버튼을 잡습니다 (a 태그, button 태그 모두 포함)
+      const commentBtn = page.locator('a.btn_comment, div[class*="comment_btn"] button, a[href*="comment"], [data-click-area*="reply"]').first();
 
-      // 버튼이 나타날 때까지 최대 5초 대기 후, 감지되면 큼지막한 버튼 껍데기 자체를 강제로 클릭!
-      await commentBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await commentBtn.click({ force: true });
+      // 버튼이 DOM에 붙을 때까지만 기다린 후
+      await commentBtn.waitFor({ state: 'attached', timeout: 5000 });
+      
+      // Playwright의 일반 클릭 대신, 브라우저 자체 JS로 강제 클릭 (가림막 무시)
+      await commentBtn.evaluate(el => el.click());
       
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
       await page.waitForTimeout(2500); 
