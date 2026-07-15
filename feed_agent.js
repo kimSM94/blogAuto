@@ -168,7 +168,7 @@ async function runFeedAgent() {
         const pageTitle = await postPage.title();
         console.log(`👀 봇 시야 확인 - 현재 주소: ${currentUrl}`);
         console.log(`👀 봇 시야 확인 - 창 제목: ${pageTitle}`);
-        
+
         const postBody = postPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
         if (await postBody.count() === 0) {
           console.log(`⚠️ 본문을 찾을 수 없음: ${logNo}`);
@@ -213,13 +213,26 @@ async function runFeedAgent() {
         }
 
         // --- [댓글 오픈 로직 (순수 JS 기반 타겟팅)] ---
+        console.log(`💬 [댓글 작업] 댓글창을 찾습니다...`);
         const commentOpened = await postPage.evaluate(() => {
-          // pst.re (모바일 댓글버튼) 포함 가능한 모든 댓글 버튼 스캔
-          const btns = document.querySelectorAll('button[data-click-area*="re"], a.btn_reply, a.btn_comment, div[class*="comment_btn"] button');
-          for (const btn of btns) {
-            if (btn.offsetParent !== null) { 
-              btn.click(); 
-              return true; 
+          // 💡 [더 강력한 타겟팅] 네이버가 사용하는 모든 댓글창 오픈 버튼 선택자 총동원
+          const selectors = [
+            'button[data-click-area*="re"]', // 캡처에서 확인된 속성
+            'a.btn_comment',                 // 일반적인 댓글 버튼
+            '.area_comment .btn_comment',    // 영역 내 댓글 버튼
+            'button.comment_btn__*',         // 캡처에서 확인된 랜덤 클래스 대응
+            'div[class*="comment_btn"] button',
+            'a[href*="comment"]',
+            '.u_cbox_btn_reply'              // 기존 방식
+          ];
+          
+          for (const selector of selectors) {
+            const btns = document.querySelectorAll(selector);
+            for (const btn of btns) {
+              if (btn.offsetParent !== null) { // 화면에 보이는 버튼만
+                btn.click();
+                return true;
+              }
             }
           }
           return false;
