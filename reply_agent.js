@@ -138,12 +138,17 @@ async function runAgent() {
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      // 💡 [안전망 1] 800px 대신 넉넉하게 바닥 부근까지 스크롤합니다.
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 500));
-      await page.waitForTimeout(1500); 
+      // 1. 화면을 맨 밑으로 끝까지 내려서 네이버가 댓글 버튼을 화면에 그리도록 유도합니다.
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(2000); 
       
-      // 💡 [안전망 1] force: true를 넣어 가려져 있어도 강제로 누르게 합니다.
-      await page.locator('.icon__seNf8, .num__OVfhz').first().click({ force: true, timeout: 10000 });
+      // 2. 💡 캡처해주신 구조 완벽 반영! (랜덤 클래스가 바뀌어도, data-click-area 속성으로 무조건 찾아냅니다)
+      const commentBtn = page.locator('button[class^="comment_btn__"], button[data-click-area="pst.re"], a.btn_comment').first();
+
+      // 버튼이 나타날 때까지 최대 5초 대기 후, 감지되면 큼지막한 버튼 껍데기 자체를 강제로 클릭!
+      await commentBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await commentBtn.click({ force: true });
+      
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
       await page.waitForTimeout(2500); 
     } catch (e) {
