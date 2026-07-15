@@ -87,10 +87,13 @@ async function runAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  const context = await browser.newContext({ 
+// 💡 [수정할 부분] 두 파일 모두 이 부분을 찾아서 똑같이 맞춰주세요!
+  const context = await browser.newContext({
     storageState: 'state.json',
     viewport: { width: 390, height: 844 },
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    isMobile: true,  // 👈 [추가 1] 나 진짜 모바일 기기야!
+    hasTouch: true   // 👈 [추가 2] 나 마우스 없고 터치스크린이야!
   });
   const page = await context.newPage();
 

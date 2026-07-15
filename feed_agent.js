@@ -93,7 +93,9 @@ async function runFeedAgent() {
   const context = await browser.newContext({
     storageState: 'state.json',
     viewport: { width: 390, height: 844 },
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    isMobile: true,  // 👈 [추가 1] 나 진짜 모바일 기기야!
+    hasTouch: true   // 👈 [추가 2] 나 마우스 없고 터치스크린이야!
   });
 
   context.setDefaultTimeout(60000);
@@ -162,6 +164,11 @@ async function runFeedAgent() {
         await postPage.goto(targetUrl, { waitUntil: 'domcontentloaded' });
         await postPage.waitForTimeout(3000);
 
+        const currentUrl = postPage.url();
+        const pageTitle = await postPage.title();
+        console.log(`👀 봇 시야 확인 - 현재 주소: ${currentUrl}`);
+        console.log(`👀 봇 시야 확인 - 창 제목: ${pageTitle}`);
+        
         const postBody = postPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
         if (await postBody.count() === 0) {
           console.log(`⚠️ 본문을 찾을 수 없음: ${logNo}`);
