@@ -38,7 +38,6 @@ async function updateNeighborWiki(blogId, newPersona, newHistory) {
   if (error) console.error('위키 업데이트 에러:', error.message);
 }
 
-// 🤖 [기능 3] LLM을 이용해 기억 기반 댓글 생성 + 위키 요약 (✨토큰 최적화 버전)
 async function generateWikiComment(wiki, postContent) {
   const shortContent = postContent.length > 1000 ? postContent.substring(0, 1000) + "..." : postContent;
 
@@ -89,8 +88,12 @@ async function runFeedAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
+  
+  // 🚨 [핵심 해결책 1] 봇에게 완벽한 아이폰(iPhone 12 Pro) 환경을 씌워줍니다!
   const context = await browser.newContext({
-    storageState: 'state.json'
+    storageState: 'state.json',
+    viewport: { width: 390, height: 844 },
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
   });
 
   context.setDefaultTimeout(60000);
@@ -101,7 +104,6 @@ async function runFeedAgent() {
     let allUniquePosts = [];
     const seen = new Set();
 
-    // 1. 페이징 처리 (1~4페이지 수집)
     for (let pageNum = 1; pageNum <= 4; pageNum++) {
       console.log(`\n📄 [피드 수집] 이웃 새글 ${pageNum}페이지 스캔 중...`);
       await feedPage.goto(`https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=${pageNum}&groupId=0`, {
@@ -113,7 +115,6 @@ async function runFeedAgent() {
 
       for (const url of pageUrls) {
         const lowerUrl = url.toLowerCase();
-
         if (lowerUrl.includes('profile') || lowerUrl.includes('category') || lowerUrl.includes('prologue') || lowerUrl.includes('guestbook')) continue;
 
         const match = url.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{10,})/);
@@ -136,11 +137,9 @@ async function runFeedAgent() {
     allUniquePosts.sort((a, b) => b.logNoNum - a.logNoNum);
     console.log(`✅ 총 ${allUniquePosts.length}개의 글을 수집하여 [완벽한 최신 시간순]으로 정렬했습니다!`);
 
-    // 2. 각 포스트 방문 및 위키/공감/댓글 처리
     for (const post of allUniquePosts) {
       const { blogId, logNoStr: logNo } = post;
 
-      // 🛡️ [위키 방어 로직] 12시간 이내 방문 스킵
       const wiki = await getNeighborWiki(blogId);
       if (wiki.last_visited_at) {
         const lastVisit = new Date(wiki.last_visited_at);
@@ -151,7 +150,6 @@ async function runFeedAgent() {
         }
       }
 
-      // 🛡️ [DB 방어 로직] 이미 처리한 글 번호 스킵
       const { data: alreadyProcessed } = await supabase.from('processed_feed_posts').select('post_id').eq('post_id', logNo);
       if (alreadyProcessed && alreadyProcessed.length > 0) {
         console.log(`[패스] DB 기록 확인됨 (이미 방문함): ${logNo}`);
@@ -172,56 +170,55 @@ async function runFeedAgent() {
 
         const postText = await postBody.innerText();
 
-        // 💡 [핵심 해결책] 봇 환경을 위해 마우스 휠 굴리듯 여러 번 스크롤 내려서 로딩 강제 유도!
-        for (let i = 0; i < 6; i++) {
-          await postPage.mouse.wheel(0, 1500);
-          await postPage.waitForTimeout(500);
-        }
-
-        // --- [공감 로직] ---
-        console.log(`❤️ [공감 시도]`);
-        try {
-          const likeBtnSelector = '#floating_bottom .area_sympathy a.u_likeit_button, a.u_likeit_button._face, [data-click-area*="sym"]';
-          const likeBtn = postPage.locator(likeBtnSelector).first();
-
-          if (await likeBtn.count() > 0) {
-            const isLiked = await likeBtn.evaluate(el =>
-              el.getAttribute('aria-pressed') === 'true' ||
-              el.classList.contains('on') ||
-              el.querySelector('.__reaction__like[style*="z-index: 2"]') !== null ||
-              el.querySelector('.on') !== null
-            );
-
-            if (!isLiked) {
-              // 💡 JS 강제 클릭으로 변경 (안정성 100배)
-              await likeBtn.evaluate(el => el.click());
-              console.log(`✅ 공감 버튼을 사람처럼 꾹~ 눌렀습니다.`);
-              await postPage.waitForTimeout(2000);
-            } else {
-              console.log(`🚫 이미 하트가 켜져 있습니다.`);
-            }
-          } else {
-            console.log(`⚠️ 공감 버튼을 화면에서 찾을 수 없습니다.`);
+        // 🚨 [핵심 해결책 2] 사람처럼 부드럽게 스크롤을 여러 번 내려서 버튼 로딩 유도
+        await postPage.evaluate(async () => {
+          for(let i=0; i<6; i++) {
+            window.scrollBy(0, window.innerHeight * 0.8);
+            await new Promise(r => setTimeout(r, 400));
           }
-        } catch (likeErr) {
-          console.log(`⚠️ 공감 버튼 클릭 중 오류 발생: ${likeErr.message}`);
+        });
+
+        // --- [공감 로직 (순수 JS 기반 타겟팅)] ---
+        console.log(`❤️ [공감 시도]`);
+        const likeStatus = await postPage.evaluate(() => {
+          const btns = document.querySelectorAll('.u_likeit_button, [data-click-area*="sym"], .area_sympathy a');
+          for (const btn of btns) {
+            // 이미 좋아요가 눌려있는지 확인
+            if (btn.getAttribute('aria-pressed') === 'true' || btn.classList.contains('on')) {
+              return 'already_liked';
+            }
+            // 버튼이 화면에 보이면 클릭!
+            if (btn.offsetParent !== null) { 
+              btn.click(); 
+              return 'clicked'; 
+            }
+          }
+          return 'not_found';
+        });
+
+        if (likeStatus === 'clicked') {
+          console.log(`✅ 공감 버튼을 사람처럼 꾹~ 눌렀습니다.`);
+          await postPage.waitForTimeout(2000);
+        } else if (likeStatus === 'already_liked') {
+          console.log(`🚫 이미 하트가 켜져 있습니다.`);
+        } else {
+          console.log(`⚠️ 공감 버튼을 화면에서 찾을 수 없습니다.`);
         }
 
-        // --- [댓글 로직] ---
-        // 💡 [핵심 해결책] 랜덤 클래스에 대비해 광범위하게 댓글 오픈 버튼 찾기
-        const commentOpenBtnSelector = 'a.btn_comment, div[class*="comment_btn"] button, a[href*="comment"], [data-click-area*="reply"]';
-        
-        try {
-          await postPage.waitForSelector(commentOpenBtnSelector, { state: 'attached', timeout: 5000 });
-        } catch (e) {
-          // 5초 안에 안 뜨면 패스
-        }
+        // --- [댓글 오픈 로직 (순수 JS 기반 타겟팅)] ---
+        const commentOpened = await postPage.evaluate(() => {
+          // pst.re (모바일 댓글버튼) 포함 가능한 모든 댓글 버튼 스캔
+          const btns = document.querySelectorAll('button[data-click-area*="re"], a.btn_reply, a.btn_comment, div[class*="comment_btn"] button');
+          for (const btn of btns) {
+            if (btn.offsetParent !== null) { 
+              btn.click(); 
+              return true; 
+            }
+          }
+          return false;
+        });
 
-        const commentOpenBtn = postPage.locator(commentOpenBtnSelector).first();
-        
-        if (await commentOpenBtn.count() > 0) {
-          // 💡 JS 강제 클릭으로 무조건 열기
-          await commentOpenBtn.evaluate(el => el.click());
+        if (commentOpened) {
           await postPage.waitForTimeout(2500);
 
           const alreadyCommented = await postPage.$$eval('.u_cbox_comment', elements => {
@@ -233,6 +230,7 @@ async function runFeedAgent() {
 
           if (alreadyCommented) {
             console.log(`🚫 [중복 방지] 이미 내가 작성한 댓글이 있습니다. 건너뜁니다.`);
+            await supabase.from('visited_neighbors').insert([{ neighbor_id: blogId }]);
           } else {
             const loginGuide = postPage.locator('.u_cbox_guide').first();
             const isLoginRequired = await loginGuide.count() > 0 && await loginGuide.innerText().then(t => t.includes('로그인'));
@@ -245,19 +243,18 @@ async function runFeedAgent() {
               const { myComment, updatedWiki } = await generateWikiComment(wiki, postText);
               console.log(`💬 [AI 맞춤 댓글] ${myComment}`);
 
-              // 💡 변수 꼬임 완벽 수정! (page -> postPage 로 통일)
               try {
+                // 댓글 입력창 포커스 및 작성
                 const commentBox = postPage.locator('.u_cbox_text').first();
-
                 await commentBox.waitFor({ state: 'visible', timeout: 5000 });
                 await commentBox.scrollIntoViewIfNeeded();
-                await commentBox.click({ force: true }); 
+                await commentBox.click({ force: true }).catch(()=>{}); 
                 await postPage.waitForTimeout(500);
 
                 await commentBox.fill(myComment);
                 await postPage.waitForTimeout(1000);
 
-                // 💡 Playwright 클릭 대신 JS 강제 클릭으로 버튼 찾기 에러 원천 차단
+                // 💡 [핵심 해결책 3] 등록 버튼도 순수 JS로 멱살 잡고 클릭
                 await postPage.evaluate(() => {
                   const uploadBtn = document.querySelector('.u_cbox_btn_upload');
                   if (uploadBtn) uploadBtn.click();
@@ -268,6 +265,8 @@ async function runFeedAgent() {
 
                 console.log(`💾 [${blogId}] 이웃 위키(기억)를 업데이트하여 DB에 저장합니다.`);
                 await updateNeighborWiki(blogId, updatedWiki.persona, updatedWiki.interaction_history);
+                await supabase.from('visited_neighbors').insert([{ neighbor_id: blogId }]);
+
               } catch (error) {
                 console.log("⚠️ 댓글창이 닫혀있거나 구조가 다릅니다. 댓글 작성을 건너뜁니다.");
               }

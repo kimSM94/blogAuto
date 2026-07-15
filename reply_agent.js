@@ -87,7 +87,11 @@ async function runAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  const context = await browser.newContext({ storageState: 'state.json' });
+  const context = await browser.newContext({ 
+    storageState: 'state.json',
+    viewport: { width: 390, height: 844 },
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+  });
   const page = await context.newPage();
 
   // 💡 페이지 기본 타임아웃을 60초로 넉넉하게 연장
