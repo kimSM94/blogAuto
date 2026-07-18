@@ -87,14 +87,7 @@ async function runAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-// 💡 [수정할 부분] 두 파일 모두 이 부분을 찾아서 똑같이 맞춰주세요!
-  const context = await browser.newContext({
-    storageState: 'state.json',
-    viewport: { width: 390, height: 844 },
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-    isMobile: true,  // 👈 [추가 1] 나 진짜 모바일 기기야!
-    hasTouch: true   // 👈 [추가 2] 나 마우스 없고 터치스크린이야!
-  });
+  const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
 
   // 💡 페이지 기본 타임아웃을 60초로 넉넉하게 연장
@@ -145,21 +138,12 @@ async function runAgent() {
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      // 💡 [핵심 해결책] 한 번에 내리지 않고, 마우스 휠을 굴리듯 여러 번 나눠서 스크롤! (네이버 로딩 강제 유도)
-      for (let i = 0; i < 5; i++) {
-        await page.mouse.wheel(0, 1500);
-        await page.waitForTimeout(500);
-      }
+      // 💡 [안전망 1] 800px 대신 넉넉하게 바닥 부근까지 스크롤합니다.
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 500));
+      await page.waitForTimeout(1500); 
       
-      // 더 광범위하게 댓글 버튼을 잡습니다 (a 태그, button 태그 모두 포함)
-      const commentBtn = page.locator('a.btn_comment, div[class*="comment_btn"] button, a[href*="comment"], [data-click-area*="reply"]').first();
-
-      // 버튼이 DOM에 붙을 때까지만 기다린 후
-      await commentBtn.waitFor({ state: 'attached', timeout: 5000 });
-      
-      // Playwright의 일반 클릭 대신, 브라우저 자체 JS로 강제 클릭 (가림막 무시)
-      await commentBtn.evaluate(el => el.click());
-      
+      // 💡 [안전망 1] force: true를 넣어 가려져 있어도 강제로 누르게 합니다.
+      await page.locator('.icon__seNf8, .num__OVfhz').first().click({ force: true, timeout: 10000 });
       console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
       await page.waitForTimeout(2500); 
     } catch (e) {
