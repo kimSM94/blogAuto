@@ -54,9 +54,9 @@ async function generateWikiComment(wiki, postContent) {
         
         [출력 규칙 (반드시 아래 JSON 형식으로 출력할 것)]
         {
-          "myComment": "과거 소통을 참고하여 새 글에 공감하는 자연스럽고 짧은 2~3문장의 댓글 (첫인사 등 했던 말 반복 금지)",
+          "myComment": "과거 소통을 참고하여 새 글에 공감하는 자연스럽고 짧은 1문장의 댓글 (첫인사 등 했던 말 반복 금지)",
           "persona": "이웃의 주요 관심사 (기존 정보에 누적해서 업데이트)",
-          "interaction_history": "이전 소통 기록과 방금 네가 작성한 myComment를 합친 핵심 요약 (토큰 낭비를 막기 위해 3문장 이내로 짧게 압축할 것)"
+          "interaction_history": "이전 소통 기록과 방금 네가 작성한 myComment를 합친 핵심 요약 (토큰 낭비를 막기 위해 1문장 이내로 짧게 압축할 것)"
         }`
       },
       { role: "user", content: `새 글 내용: ${shortContent}` }
