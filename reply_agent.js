@@ -88,26 +88,17 @@ async function runAgent() {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   
-  // 🚨 [핵심 1] feed_agent처럼 여기도 완벽하게 '아이폰'으로 위장시켜야 네이버가 모바일 버튼을 그려줍니다!
-  const context = await browser.newContext({
-    storageState: 'state.json',
-    viewport: { width: 390, height: 844 },
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-    isMobile: true,
-    hasTouch: true
-  });
-  
+  // 💡 feed_agent.js에서 정상 작동한 순정 세팅으로 원복! (아이폰 위장 제거)
+  const context = await browser.newContext({ storageState: 'state.json' });
   const page = await context.newPage();
+
   page.setDefaultTimeout(60000);
 
   try {
-    // -------------------------------------------------------------
-    // 내 블로그 최신 글 번호 자동 추출 로직
-    // -------------------------------------------------------------
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
     
     await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000); // 깃허브 서버는 느리므로 넉넉히 대기
+    await page.waitForTimeout(3000); // 💡 feed_agent.js와 동일하게 3초 넉넉히 대기
 
     const latestLogNo = await page.evaluate((id) => {
       const links = Array.from(document.querySelectorAll('a'));
@@ -140,71 +131,34 @@ async function runAgent() {
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
     
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-    
-    // 🚨 [핵심 2] 깃허브 액션은 미국 서버라 로딩이 느립니다. 페이지 이동 후 버튼이 렌더링될 때까지 충분히 5초 기다려줍니다.
-    await page.waitForTimeout(5000); 
+    await page.waitForTimeout(3000); // 💡 feed_agent.js와 동일하게 3초 대기
 
     console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+    
+    // 💡 feed_agent.js에서 100% 통했던 무식하고 확실한 방식 그대로 적용!
+    await page.evaluate(() => window.scrollBy(0, 2000));
+    await page.waitForTimeout(1500);
+
+    const commentBtnSelector = '.icon__seNf8, .num__OVfhz';
     try {
-      // 💡 1. 스크롤 내리기 (정상 작동 확인됨)
-      await page.evaluate(async () => {
-        const targetSelector = 'div[class*="comment_area"], button[data-click-area*="re"]';
-        for (let i = 0; i < 30; i++) {
-          const el = document.querySelector(targetSelector);
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            if (rect.top >= 0 && rect.top <= window.innerHeight) {
-              break; 
-            }
-          }
-          window.scrollBy(0, window.innerHeight * 0.8);
-          await new Promise(r => setTimeout(r, 400));
-        }
-      });
-      
-      await page.waitForTimeout(1000); 
-
-      // 💡 2. Playwright 클릭을 버리고, 자바스크립트로 브라우저 안에서 직접 때립니다!
-      const isClicked = await page.evaluate(() => {
-        // 캡처해주신 구조를 완벽하게 타겟팅
-        const btn = document.querySelector('button[data-click-area="pst.re"], button[class*="comment_btn"]');
-        
-        if (btn) {
-          // 1타: 버튼 자체를 클릭
-          btn.click(); 
-          
-          // 2타: 혹시 네이버가 내부 아이콘 클릭만 인식할 경우를 대비해 안쪽 span도 한 번 더 클릭!
-          const icon = btn.querySelector('.icon__seNf8');
-          if (icon) icon.click();
-          
-          return true;
-        }
-        return false;
-      });
-
-      if (isClicked) {
-        console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-        await page.waitForTimeout(3000); 
-      } else {
-        throw new Error("화면엔 온 것 같은데 버튼 요소를 못 찾음");
-      }
-      
+      await page.waitForSelector(commentBtnSelector, { state: 'visible', timeout: 10000 });
     } catch (e) {
+      // 10초 대기 초과 시 패스
+    }
+
+    const commentOpenBtn = page.locator(commentBtnSelector).first();
+    if (await commentOpenBtn.count() > 0) {
+      await commentOpenBtn.click();
+      console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
+      await page.waitForTimeout(2500); 
+    } else {
       console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다. (댓글이 없거나 막힘)');
     }
 
-    // 💡 [안전망 2] 여기서 무작정 기다리면 60초 뒤에 에러가 납니다! try-catch로 감싸줍니다.
-    try {
-      await page.waitForSelector('.u_cbox_comment', { timeout: 10000 });
-    } catch (e) {
-      console.log('⏩ 달린 댓글이 없거나 버튼이 열리지 않았습니다. 내 블로그 답글 달기를 스킵합니다.');
-      // 여기서 return하지 않고 이웃 순회를 돌기 위해 빈 배열로 처리하고 아래 로직을 뛰어넘습니다.
-    }
-    
-    // 댓글이 화면에 있으면 긁어오고, 없으면 알아서 빈 배열([])이 됩니다.
+    // 💡 [안전망] 윗 단계에서 클릭이 안 되었거나 댓글이 없으면 빈 배열 반환
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
       elements.map(el => el.getAttribute('data-info')).filter(info => info)
-    ).catch(() => []); // 에러 나면 빈 배열 반환
+    ).catch(() => []); 
 
     console.log(`총 ${rawDataInfos.length}개의 댓글 데이터를 분석합니다...`);
 
@@ -231,12 +185,8 @@ async function runAgent() {
       parsedComments.push({ commentNo, parentNo, replyLevel, isMine, isDeleted });
     }
 
-    // =====================================================================
-    // DB에서 기억 꺼내오기
-    // =====================================================================
     const lastProcessedNo = await getLastProcessedCommentNo();
     let currentSessionMaxNo = lastProcessedNo;
-    // =====================================================================
 
     let index = 1;
     for (const comment of parsedComments) {
@@ -250,14 +200,12 @@ async function runAgent() {
         continue;
       }
 
-      // 💡 초고속 건너뛰기
       const currentNoInt = parseInt(commentNo, 10);
       if (currentNoInt <= lastProcessedNo) {
         console.log(`⏩ [스킵] 이미 예전에 확인했던 옛날 댓글입니다. DB 조회 없이 넘어갑니다.`);
         continue;
       }
 
-      // 새로 발견한 가장 큰 숫자를 기록
       if (currentNoInt > currentSessionMaxNo) {
         currentSessionMaxNo = currentNoInt;
       }
@@ -283,16 +231,10 @@ async function runAgent() {
         await commentLocator.locator('.u_cbox_btn_reply').first().click({ force: true });
         await page.waitForTimeout(1000); 
         await page.fill('.u_cbox_text', aiReplyText);
-        // 💡 복잡한 ID 찾기 없이, 텍스트 입력창 근처의 첫 번째 등록 버튼을 강제 클릭!
+        
         const replyUploadBtn = page.locator('.u_cbox_btn_upload').first();
-
-        // 화면에 최대한 보이도록 스크롤
         await replyUploadBtn.scrollIntoViewIfNeeded(); 
-
-        // 플로팅 바에 가려져 있어도 무시하고 강제로(force) 꾹 누르기
         await replyUploadBtn.click({ force: true, delay: 150 });
-
-        // 서버에 안전하게 등록될 때까지 대기
         await page.waitForTimeout(1500);
         
         await supabase.from('processed_comments').insert([{ comment_id: commentNo }]);
@@ -367,7 +309,7 @@ async function runAgent() {
               }, neighborId);
 
               if (latestPostUrl) {
-                console.log(`🔗 [답방 진입] 숫자가 가장 큰(진짜 최신) 게시글을 발견했습니다! 들어갑니다.`);
+                console.log(`🔗 [답방 진입] 최신 게시글 발견! 들어갑니다.`);
                 const fullUrl = latestPostUrl.startsWith('http') ? latestPostUrl : `https://m.blog.naver.com${latestPostUrl}`;
                 
                 await neighborPage.goto(fullUrl, { waitUntil: 'domcontentloaded' });
@@ -375,16 +317,12 @@ async function runAgent() {
                 
                 postBodyLocator = neighborPage.locator('.se-main-container, .se_component_wrap, .post_ct').first();
               } else {
-                console.log(`⚠️ [답방 패스] 이웃 블로그에 클릭할 수 있는 최신 글 목록이 없습니다.`);
+                console.log(`⚠️ [답방 패스] 클릭할 수 있는 최신 글이 없습니다.`);
               }
-            } else {
-              console.log(`🔗 [답방 진입] 대문이 곧 본문인 블로그입니다! 바로 읽기를 시작합니다.`);
             }
 
             if (await postBodyLocator.count() > 0) {
               const postText = await postBodyLocator.innerText();
-              console.log(`[답방 분석] 이웃 글을 성공적으로 읽어왔습니다! AI 댓글을 고민합니다...`);
-              
               const neighborComment = await generateNeighborComment(postText);
               console.log(`💬 [이웃 블로그 AI 댓글] ${neighborComment}`);
 
@@ -427,21 +365,18 @@ async function runAgent() {
                       const info = el.getAttribute('data-info');
                       return info && info.includes('mine:true');
                     }).length;
-                  }).catch(() => []); // 에러 방어
+                  }).catch(() => 0);
 
                   if (myCommentCount > 0) {
                     console.log(`🚫 [답방 패스] 이 게시글에는 이미 내가 남긴 댓글이 존재합니다! (중복 작성 방지)`);
                     await supabase.from('visited_neighbors').insert([{ neighbor_id: neighborId }]);
                   } else {
-                    // 1. 입력창을 먼저 한 번 클릭(터치)해서 네이버 JS를 깨웁니다.
                     await neighborPage.locator('.u_cbox_text').first().click({ force: true });
                     await neighborPage.waitForTimeout(500);
 
-                    // 2. 텍스트를 채워 넣습니다.
                     await neighborPage.fill('.u_cbox_text', neighborComment);
                     await neighborPage.waitForTimeout(500);
 
-                    // 3. Playwright의 시력 검사를 무시하고, JS로 등록 버튼을 직접 때립니다!
                     await neighborPage.evaluate(() => {
                       const uploadBtn = document.querySelector('.u_cbox_btn_upload');
                       if (uploadBtn) uploadBtn.click();
@@ -472,9 +407,6 @@ async function runAgent() {
       }
     }
 
-    // =====================================================================
-    // 오늘 작업 끝! DB에 가장 큰 번호 덮어쓰기
-    // =====================================================================
     if (currentSessionMaxNo > lastProcessedNo) {
       await saveLastProcessedCommentNo(currentSessionMaxNo);
     }
