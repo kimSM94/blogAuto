@@ -87,10 +87,17 @@ async function runAgent() {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  const context = await browser.newContext({ storageState: 'state.json' });
+  
+  // 🚨 [핵심 1] feed_agent처럼 여기도 완벽하게 '아이폰'으로 위장시켜야 네이버가 모바일 버튼을 그려줍니다!
+  const context = await browser.newContext({
+    storageState: 'state.json',
+    viewport: { width: 390, height: 844 },
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+    isMobile: true,
+    hasTouch: true
+  });
+  
   const page = await context.newPage();
-
-  // 💡 페이지 기본 타임아웃을 60초로 넉넉하게 연장
   page.setDefaultTimeout(60000);
 
   try {
@@ -99,9 +106,8 @@ async function runAgent() {
     // -------------------------------------------------------------
     console.log(`🔍 [탐색] 내 블로그(${BLOG_ID})의 가장 최신 글 번호를 찾고 있습니다...`);
     
-    // 💡 networkidle -> domcontentloaded 로 변경 (무한 대기 방지)
     await page.goto(`https://m.blog.naver.com/${BLOG_ID}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000); // 깃허브 서버는 느리므로 넉넉히 대기
 
     const latestLogNo = await page.evaluate((id) => {
       const links = Array.from(document.querySelectorAll('a'));
@@ -130,13 +136,15 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
-    // 찾은 최신 글 번호로 이동
     const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
     console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
     
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    
+    // 🚨 [핵심 2] 깃허브 액션은 미국 서버라 로딩이 느립니다. 페이지 이동 후 버튼이 렌더링될 때까지 충분히 5초 기다려줍니다.
+    await page.waitForTimeout(5000); 
 
-console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+    console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
       // 💡 1. 스크롤 내리기 (정상 작동 확인됨)
       await page.evaluate(async () => {
