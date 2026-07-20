@@ -138,44 +138,47 @@ async function runAgent() {
 
 console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      // 💡 1. 네이버 지연 로딩을 확실하게 깨우기 위해 사람처럼 여러 번 휠 스크롤
+      // 💡 1. 스크롤 내리기 (정상 작동 확인됨)
       await page.evaluate(async () => {
-        for(let i=0; i<6; i++) {
+        const targetSelector = 'div[class*="comment_area"], button[data-click-area*="re"]';
+        for (let i = 0; i < 30; i++) {
+          const el = document.querySelector(targetSelector);
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            if (rect.top >= 0 && rect.top <= window.innerHeight) {
+              break; 
+            }
+          }
           window.scrollBy(0, window.innerHeight * 0.8);
           await new Promise(r => setTimeout(r, 400));
         }
       });
-      await page.waitForTimeout(1000);
       
-      // 💡 2. 캡처 이미지 완벽 반영! (JS 강제 클릭)
-      const commentOpened = await page.evaluate(() => {
-        // 캡처에서 확인된 pst.re 속성과 클래스 이름들을 정확히 타겟팅합니다.
-        const selectors = [
-          'button[data-click-area*="re"]', // pst.re 완벽 대응
-          'button[class*="comment_btn"]',  // comment_btn__TUucZ 완벽 대응
-          '.icon__seNf8',                  // 말풍선 아이콘
-          '.num__0Vfhz'                    // 숫자
-        ];
+      await page.waitForTimeout(1000); 
+
+      // 💡 2. Playwright 클릭을 버리고, 자바스크립트로 브라우저 안에서 직접 때립니다!
+      const isClicked = await page.evaluate(() => {
+        // 캡처해주신 구조를 완벽하게 타겟팅
+        const btn = document.querySelector('button[data-click-area="pst.re"], button[class*="comment_btn"]');
         
-        for (const selector of selectors) {
-          const elements = document.querySelectorAll(selector);
-          for (const el of elements) {
-            // 아이콘이나 숫자를 찾았을 경우, 그를 감싸고 있는 최상단 button을 찾아 클릭
-            const targetBtn = el.closest('button') || el; 
-            if (targetBtn && targetBtn.offsetParent !== null) {
-              targetBtn.click();
-              return true;
-            }
-          }
+        if (btn) {
+          // 1타: 버튼 자체를 클릭
+          btn.click(); 
+          
+          // 2타: 혹시 네이버가 내부 아이콘 클릭만 인식할 경우를 대비해 안쪽 span도 한 번 더 클릭!
+          const icon = btn.querySelector('.icon__seNf8');
+          if (icon) icon.click();
+          
+          return true;
         }
         return false;
       });
 
-      if (commentOpened) {
+      if (isClicked) {
         console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-        await page.waitForTimeout(3000); // 팝업창이 뜰 때까지 넉넉히 3초 대기
+        await page.waitForTimeout(3000); 
       } else {
-        throw new Error("버튼을 찾을 수 없음");
+        throw new Error("화면엔 온 것 같은데 버튼 요소를 못 찾음");
       }
       
     } catch (e) {

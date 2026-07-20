@@ -5,7 +5,7 @@ node_modules/
 .env
 
 # 네이버 로그인 세션 파일 (해킹 방지)
-state.json
+# state.json
 
 # 기타 에디터/운영체제 숨김 파일
 .DS_Store
