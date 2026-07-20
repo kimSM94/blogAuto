@@ -134,8 +134,17 @@ async function runAgent() {
     console.log(`[이동] 내 블로그 댓글 전용 페이지로 순간이동: ${commentUrl}`);
     
     await page.goto(commentUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000); // 💡 서버 환경을 고려해 3초로 대기 시간 연장
     
-    // 💡 버튼을 누를 필요 없이, 이미 열려있는 댓글창에 댓글 데이터가 뜰 때까지만 기다립니다.
+    // 🚨 [여기에 추가!] 봇이 지금 화면에서 무슨 글자를 보고 있는지 300자만 훔쳐옵니다.
+    const pageTitle = await page.title();
+    console.log(`👀 봇 시야 확인 - 창 제목: ${pageTitle}`);
+    try {
+      const pageText = await page.evaluate(() => document.body.innerText.substring(0, 300));
+      console.log(`👀 봇 시야 확인 - 화면 텍스트: \n${pageText}`);
+    } catch (e) {}
+    // -------------------------------------------------------------
+
     console.log('[동작] 댓글 데이터 로딩 대기 중...');
     try {
       await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
