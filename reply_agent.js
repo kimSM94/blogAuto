@@ -82,7 +82,7 @@ async function runAgent() {
   console.log('🤖 네이버 블로그 답글 자동화 에이전트 시작...');
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
   
