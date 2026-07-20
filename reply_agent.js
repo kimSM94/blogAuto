@@ -127,50 +127,23 @@ async function runAgent() {
     const POST_NO = latestLogNo;
     console.log(`✅ [성공] 최신 게시글 번호 장착 완료: ${POST_NO}`);
 
-    const targetUrl = `https://m.blog.naver.com/${BLOG_ID}/${POST_NO}`;
-    console.log(`[이동] 내 블로그 최신 포스트: ${targetUrl}`);
+    // =================================================================
+    // 🚀 [궁극의 치트키] 본문을 거치지 않고 '댓글 전용 페이지'로 다이렉트 진입!
+    // =================================================================
+    const commentUrl = `https://m.blog.naver.com/CommentList.naver?blogId=${BLOG_ID}&logNo=${POST_NO}`;
+    console.log(`[이동] 내 블로그 댓글 전용 페이지로 순간이동: ${commentUrl}`);
     
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000); // 💡 feed_agent.js와 동일하게 3초 대기
-
-console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+    await page.goto(commentUrl, { waitUntil: 'domcontentloaded' });
     
+    // 💡 버튼을 누를 필요 없이, 이미 열려있는 댓글창에 댓글 데이터가 뜰 때까지만 기다립니다.
+    console.log('[동작] 댓글 데이터 로딩 대기 중...');
     try {
-      // 💡 1. 2000px 스크롤 대신, 1500px씩 10번(총 15,000px) 무식하게 바닥까지 뚫고 내려갑니다.
-      await page.evaluate(async () => {
-        for (let i = 0; i < 10; i++) {
-          window.scrollBy(0, 1500); 
-          await new Promise(r => setTimeout(r, 200));
-        }
-      });
-      
-      // 스크롤 다 내리고 네이버가 댓글 버튼을 화면에 그릴 시간을 넉넉히 2초 줍니다.
-      await page.waitForTimeout(2000);
-
-      // 💡 2. Playwright의 까다로운 클릭을 버리고, 자바스크립트로 발견 즉시 강제 클릭!
-      const isClicked = await page.evaluate(() => {
-        const btns = document.querySelectorAll('button[data-click-area*="re"], button[class*="comment_btn"], .icon__seNf8, .num__0Vfhz');
-        for (const btn of btns) {
-          // 아이콘이나 숫자 껍데기일 경우, 진짜 버튼을 찾아냄
-          const target = btn.closest('button') || btn;
-          if (target) {
-            target.click();
-            return true;
-          }
-        }
-        return false;
-      });
-
-      if (isClicked) {
-        console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-        await page.waitForTimeout(3000); 
-      } else {
-        throw new Error("버튼 못 찾음");
-      }
-      
+      await page.waitForSelector('.u_cbox_comment', { state: 'attached', timeout: 10000 });
+      console.log('✅ 댓글 목록 로딩 완료!');
     } catch (e) {
-      console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다. (댓글이 없거나 막힘)');
+      console.log('⚠️ 달린 댓글이 없거나, 댓글창이 닫혀있습니다.');
     }
+    await page.waitForTimeout(2000); 
 
     // 💡 [안전망] 윗 단계에서 클릭이 안 되었거나 댓글이 없으면 빈 배열 반환
     const rawDataInfos = await page.$$eval('.u_cbox_comment', elements => 
@@ -178,6 +151,8 @@ console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     ).catch(() => []); 
 
     console.log(`총 ${rawDataInfos.length}개의 댓글 데이터를 분석합니다...`);
+
+    // ... (이 아래에 있는 const repliedParentIds = new Set(); 부터는 기존 코드 그대로 두시면 됩니다!)
 
     const repliedParentIds = new Set();
     const parsedComments = [];
