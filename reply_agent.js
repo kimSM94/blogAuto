@@ -136,16 +136,48 @@ async function runAgent() {
     
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
-    console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     try {
-      // 💡 [안전망 1] 800px 대신 넉넉하게 바닥 부근까지 스크롤합니다.
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight - 500));
-      await page.waitForTimeout(1500); 
+      // 💡 1. 네이버 지연 로딩을 확실하게 깨우기 위해 사람처럼 여러 번 휠 스크롤
+      await page.evaluate(async () => {
+        for(let i=0; i<6; i++) {
+          window.scrollBy(0, window.innerHeight * 0.8);
+          await new Promise(r => setTimeout(r, 400));
+        }
+      });
+      await page.waitForTimeout(1000);
       
-      // 💡 [안전망 1] force: true를 넣어 가려져 있어도 강제로 누르게 합니다.
-      await page.locator('.icon__seNf8, .num__OVfhz').first().click({ force: true, timeout: 10000 });
-      console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-      await page.waitForTimeout(2500); 
+      // 💡 2. 캡처 이미지 완벽 반영! (JS 강제 클릭)
+      const commentOpened = await page.evaluate(() => {
+        // 캡처에서 확인된 pst.re 속성과 클래스 이름들을 정확히 타겟팅합니다.
+        const selectors = [
+          'button[data-click-area*="re"]', // pst.re 완벽 대응
+          'button[class*="comment_btn"]',  // comment_btn__TUucZ 완벽 대응
+          '.icon__seNf8',                  // 말풍선 아이콘
+          '.num__0Vfhz'                    // 숫자
+        ];
+        
+        for (const selector of selectors) {
+          const elements = document.querySelectorAll(selector);
+          for (const el of elements) {
+            // 아이콘이나 숫자를 찾았을 경우, 그를 감싸고 있는 최상단 button을 찾아 클릭
+            const targetBtn = el.closest('button') || el; 
+            if (targetBtn && targetBtn.offsetParent !== null) {
+              targetBtn.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (commentOpened) {
+        console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
+        await page.waitForTimeout(3000); // 팝업창이 뜰 때까지 넉넉히 3초 대기
+      } else {
+        throw new Error("버튼을 찾을 수 없음");
+      }
+      
     } catch (e) {
       console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다. (댓글이 없거나 막힘)');
     }
