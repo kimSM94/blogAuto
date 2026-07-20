@@ -133,25 +133,42 @@ async function runAgent() {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000); // 💡 feed_agent.js와 동일하게 3초 대기
 
-    console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
+console.log('[동작] 숨겨진 댓글창 버튼을 찾아 클릭합니다...');
     
-    // 💡 feed_agent.js에서 100% 통했던 무식하고 확실한 방식 그대로 적용!
-    await page.evaluate(() => window.scrollBy(0, 2000));
-    await page.waitForTimeout(1500);
-
-    const commentBtnSelector = '.icon__seNf8, .num__OVfhz';
     try {
-      await page.waitForSelector(commentBtnSelector, { state: 'visible', timeout: 10000 });
-    } catch (e) {
-      // 10초 대기 초과 시 패스
-    }
+      // 💡 1. 2000px 스크롤 대신, 1500px씩 10번(총 15,000px) 무식하게 바닥까지 뚫고 내려갑니다.
+      await page.evaluate(async () => {
+        for (let i = 0; i < 10; i++) {
+          window.scrollBy(0, 1500); 
+          await new Promise(r => setTimeout(r, 200));
+        }
+      });
+      
+      // 스크롤 다 내리고 네이버가 댓글 버튼을 화면에 그릴 시간을 넉넉히 2초 줍니다.
+      await page.waitForTimeout(2000);
 
-    const commentOpenBtn = page.locator(commentBtnSelector).first();
-    if (await commentOpenBtn.count() > 0) {
-      await commentOpenBtn.click();
-      console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
-      await page.waitForTimeout(2500); 
-    } else {
+      // 💡 2. Playwright의 까다로운 클릭을 버리고, 자바스크립트로 발견 즉시 강제 클릭!
+      const isClicked = await page.evaluate(() => {
+        const btns = document.querySelectorAll('button[data-click-area*="re"], button[class*="comment_btn"], .icon__seNf8, .num__0Vfhz');
+        for (const btn of btns) {
+          // 아이콘이나 숫자 껍데기일 경우, 진짜 버튼을 찾아냄
+          const target = btn.closest('button') || btn;
+          if (target) {
+            target.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (isClicked) {
+        console.log('✅ 댓글 버튼 클릭 성공! 데이터 로딩 대기...');
+        await page.waitForTimeout(3000); 
+      } else {
+        throw new Error("버튼 못 찾음");
+      }
+      
+    } catch (e) {
       console.log('⚠️ 댓글 열기 버튼을 찾지 못했습니다. (댓글이 없거나 막힘)');
     }
 
